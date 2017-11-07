@@ -28,6 +28,7 @@ inhosp_dd <- get_datadict("MINDUSA_IH_TOKEN")
 
 ## -- Exporting REDCap event names ---------------------------------------------
 ## rctoken must be a REDCap API token stored as a named object in .Renviron
+## Database must be longitudinal; otherwise you'll get a Bad Request error
 get_events <- function(rctoken){
   tmp <- postForm(
     "https://redcap.vanderbilt.edu/api/", ## URL for REDCap instance
@@ -57,7 +58,7 @@ get_pF <- function(
   export_labels = c("all", "factors", "none"),
   id_field,
   forms,
-  events
+  events = NULL
 ){
   ## Should we export raw or label versions of factors and checkboxes
   export_labels <- match.arg(export_labels)
@@ -65,18 +66,34 @@ get_pF <- function(
   factor_export <- ifelse(export_labels %in% c("all", "factors"), "label", "raw")
   cb_export <- ifelse(export_labels == "all", TRUE, FALSE)
   
-  postForm(
-    "https://redcap.vanderbilt.edu/api/",   ## URL for REDCap instance
-    token = Sys.getenv(rctoken),            ## token for specific database
-    content = "record",                     ## export records
-    format = "csv",                         ## export as CSV
-    fields = id_field,                      ## ID variable - need on every row
-    forms = paste(forms, collapse = ","),   ## which form(s) to export?
-    events = paste(events, collapse = ","), ## which event(s) to export?
-    rawOrLabel = factor_export,             ## exp. factor labels vs numbers
-    exportCheckboxLabel = cb_export,        ## exp. NA/checkbox labels vs U/C
-    exportDataAccessGroups = FALSE          ## don't need data access grps
-  )
+  ## If database is not longitudinal or events not specified, take all events
+  if(is.null(events)){
+    postForm(
+      "https://redcap.vanderbilt.edu/api/",   ## URL for REDCap instance
+      token = Sys.getenv(rctoken),            ## token for specific database
+      content = "record",                     ## export records
+      format = "csv",                         ## export as CSV
+      fields = id_field,                      ## ID variable - need on every row
+      forms = paste(forms, collapse = ","),   ## which form(s) to export?
+      rawOrLabel = factor_export,             ## exp. factor labels vs numbers
+      exportCheckboxLabel = cb_export,        ## exp. NA/checkbox labels vs U/C
+      exportDataAccessGroups = FALSE          ## don't need data access grps
+    )
+  ## Otherwise, take only specified events
+  } else{
+    postForm(
+      "https://redcap.vanderbilt.edu/api/",   ## URL for REDCap instance
+      token = Sys.getenv(rctoken),            ## token for specific database
+      content = "record",                     ## export records
+      format = "csv",                         ## export as CSV
+      fields = id_field,                      ## ID variable - need on every row
+      forms = paste(forms, collapse = ","),   ## which form(s) to export?
+      events = paste(events, collapse = ","), ## which event(s) to export?
+      rawOrLabel = factor_export,             ## exp. factor labels vs numbers
+      exportCheckboxLabel = cb_export,        ## exp. NA/checkbox labels vs U/C
+      exportDataAccessGroups = FALSE          ## don't need data access grps
+    )
+  }
 }
 
 ## Example: Read in enrollment qual + dates tracking from only enrollment day
@@ -91,9 +108,9 @@ get_pF <- function(
 ## head(tmp_df)
 
 ## -- Wrapper to read in data, turn into data.frame, remove extra _s -----------
-import_df <- function(rctoken, id_field, forms, events, ...){
+import_df <- function(rctoken, id_field, forms, ...){
   tmp_pF <- get_pF(
-    rctoken, id_field = id_field, forms = forms, events = events, ...
+    rctoken, id_field = id_field, forms = forms, ...
   )
   tmp_csv <- get_csv(tmp_pF)
   
@@ -112,3 +129,24 @@ import_df <- function(rctoken, id_field, forms, events, ...){
 ##   events = c("enrollment__day_0_arm_1")
 ## )
 ## head(tmp)
+
+## -- Get factor levels from string in REDCap data dictionary ------------------
+## Returns a numeric vector of all possible factor levels in order listed in
+## REDCap, with names() = factor levels
+get_factor_levels <- function(ddict, varname){
+  tmp <- ddict %>%
+    filter(field_name == varname) %>%
+    pull(select_choices_or_calculations)
+  
+  flevels <- str_extract_all(tmp, "[0-9]+(?=,)")[[1]] %>% as.numeric
+  names(flevels) <- str_extract_all(tmp, "(?<=, )[a-z, A-Z, 0-9]+")[[1]] %>%
+    trimws
+  
+  return(flevels)
+}
+
+## Example: Exclusion site factor labels
+## exc_site_levels <- get_factor_levels(
+##   ddict = get_datadict("MINDUSA_EXC_TOKEN"),
+##   varname = "exc_site"
+## )
