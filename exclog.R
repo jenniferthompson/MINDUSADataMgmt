@@ -169,12 +169,12 @@ main_exclusions <- c(
   paste(
     "exc",
     c("1_resolving", "2_pregbf", "34_neuro", "5_torsadesqtc", "6_maintmeds",
-      "7_nmsallergy", "8_death24", "9a_refusal_md", "9b_refusal_ptsurr",
+      "7_nmsallergy", "8_death24", "9a_refusal_md", # "9b_refusal_ptsurr",
       "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison", "12_coenroll",
       "99_other", "none"),
     sep = "_"
   ),
-  "screened", "approached", "refused"
+  "screened", "excluded", "approached", "refused"
 )
 
 summarize_exc <- exc_df %>%
@@ -184,8 +184,8 @@ summarize_exc <- exc_df %>%
   group_by(exclusion) %>%
   summarise_all(funs(pts = sum, pct = mean)) %>%
   mutate(pct = pct * 100,
-         order = ifelse(screened, 1,
-                 ifelse(excluded, 2,
-                 ifelse(approached, 4,
-                 ifelse(refused, 5, 3))))) %>%
+         order = ifelse(exclusion == "screened", 1,
+                 ifelse(exclusion == "excluded", 2,
+                 ifelse(exclusion == "approached", 4,
+                 ifelse(exclusion == "refused", 5, 3))))) %>%
   arrange(order, desc(pct))
