@@ -141,7 +141,11 @@ exc_df <- exc_df %>%
     
     ## Indicator for "approached": Patient had no other exclusions and they or
     ## surrogate was approached for consent
-    approached = screened & !excluded & exc_9b_refusal_ptsurr
+    approached = screened & !excluded & exc_9b_refusal_ptsurr,
+    
+    ## Indicator for "refused": Patient/surrogate was approached but refused
+    ## consent (should match `approached` until we add in enrollment log)
+    refused = screened & !excluded & approached & exc_9b_refusal_ptsurr
   )
 
 ## -- Data checks --------------------------------------------------------------
@@ -170,7 +174,7 @@ main_exclusions <- c(
       "99_other", "none"),
     sep = "_"
   ),
-  "screened", "approached"
+  "screened", "approached", "refused"
 )
 
 summarize_exc <- exc_df %>%
@@ -179,5 +183,9 @@ summarize_exc <- exc_df %>%
   gather(key = exclusion, value = yn) %>%
   group_by(exclusion) %>%
   summarise_all(funs(pts = sum, pct = mean)) %>%
-  mutate(pct = pct * 100) %>%
-  arrange(desc(pct))
+  mutate(pct = pct * 100,
+         order = ifelse(screened, 1,
+                 ifelse(excluded, 2,
+                 ifelse(approached, 4,
+                 ifelse(refused, 5, 3))))) %>%
+  arrange(order, desc(pct))
