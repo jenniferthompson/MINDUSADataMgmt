@@ -170,8 +170,8 @@ main_exclusions <- c(
     "exc",
     c("1_resolving", "2_pregbf", "34_neuro", "5_torsadesqtc", "6_maintmeds",
       "7_nmsallergy", "8_death24", "9a_refusal_md", # "9b_refusal_ptsurr",
-      "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison", "12_coenroll",
-      "99_other", "none"),
+      "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison",
+      "12_coenroll", "99_other", "none"),
     sep = "_"
   ),
   "screened", "excluded", "approached", "refused"
@@ -189,3 +189,6 @@ summarize_exc <- exc_df %>%
                  ifelse(exclusion == "approached", 4,
                  ifelse(exclusion == "refused", 5, 3))))) %>%
   arrange(order, desc(pct))
+
+## -- Save final exclusions dataset --------------------------------------------
+save(exc_df, file = "analysisdata/exclusions.Rdata")
