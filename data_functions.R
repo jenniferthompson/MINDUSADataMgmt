@@ -24,8 +24,6 @@ get_datadict <- function(rctoken){
 ## Example: get data dictionary for exclusion log
 ## exc_dd <- get_datadict("MINDUSA_EXC_TOKEN")
 
-inhosp_dd <- get_datadict("MINDUSA_IH_TOKEN")
-
 ## -- Exporting REDCap event names ---------------------------------------------
 ## rctoken must be a REDCap API token stored as a named object in .Renviron
 ## Database must be longitudinal; otherwise you'll get a Bad Request error
@@ -41,6 +39,22 @@ get_events <- function(rctoken){
 
 ## Example: get events for in-hospital database
 ## inhosp_events <- get_events("MINDUSA_IH_TOKEN")
+
+## -- Exporting REDCap form -> event mapping -----------------------------------
+## rctoken must be a REDCap API token stored as a named object in .Renviron
+## Database must be longitudinal; otherwise you'll get a Bad Request error
+get_event_mapping <- function(rctoken){
+  tmp <- postForm(
+    uri = "https://redcap.vanderbilt.edu/api/",
+    token = Sys.getenv(rctoken),
+    content = "formEventMapping",
+    format = "csv",
+    returnFormat = "csv"
+  )
+  
+  ## Our databases are the same for each arm; don't need first column
+  return(get_csv(tmp)[, -1])
+}
 
 ## -- Importing data from REDCap databases -------------------------------------
 ## - rctoken: REDCap API token stored as a named object in .Renviron
