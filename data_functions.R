@@ -65,10 +65,10 @@ get_event_mapping <- function(rctoken){
 ##   - "none" = export numeric codes for factors and checkboxes (0/1)
 ##   I don't think there's a way to export labels for factors + 0/1 for CBs.
 ## - id_field: character vector of length 1; represents patient ID field name
-## - forms: character vector specifying which form(s) to export
-## - fields: character vector specifying which field(s) to export
-## - events: character vector specifying which event(s) to export
-##   (original REDCap name; eg, enrollment__day_0_arm_1, not Enrollment / Day 0)
+## - forms: character vector specifying which form(s) to export; default = all
+## - fields: character vector specifying which field(s) to export; default = all
+## - events: character vector specifying which event(s) to export; default = all
+##     (orig. REDCap name; eg, enrollment__day_0_arm_1, not Enrollment / Day 0)
 get_pF <- function(
   rctoken,
   export_labels = c("all", "factors", "none"),
@@ -102,9 +102,9 @@ get_pF <- function(
        token = Sys.getenv("{rctoken}"),        ## token for specific database
        content = "record",                     ## export records
        format = "csv",                         ## export as CSV
-       {forms_line}
-       {fields_line}
-       {events_line}
+       {forms_line}                            ## which forms to export
+       {fields_line}                           ## which fields to export
+       {events_line}                           ## which events to export
        rawOrLabel = "{factor_export}",         ## exp. factor labels vs numbers
        exportCheckboxLabel = {cb_export},      ## exp. NA/checkbox labels vs U/C
        exportDataAccessGroups = FALSE          ## do not need data access grps
