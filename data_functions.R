@@ -3,6 +3,7 @@
 ################################################################################
 
 library(RCurl)
+library(glue)
 
 ## -- Create CSV out of postForm() object --------------------------------------
 get_csv <- function(pF){
@@ -65,13 +66,15 @@ get_event_mapping <- function(rctoken){
 ##   I don't think there's a way to export labels for factors + 0/1 for CBs.
 ## - id_field: character vector of length 1; represents patient ID field name
 ## - forms: character vector specifying which form(s) to export
+## - fields: character vector specifying which field(s) to export
 ## - events: character vector specifying which event(s) to export
 ##   (original REDCap name; eg, enrollment__day_0_arm_1, not Enrollment / Day 0)
 get_pF <- function(
   rctoken,
   export_labels = c("all", "factors", "none"),
   id_field,
-  forms,
+  forms = NULL,
+  fields = NULL,
   events = NULL
 ){
   ## Should we export raw or label versions of factors and checkboxes
@@ -80,34 +83,36 @@ get_pF <- function(
   factor_export <- ifelse(export_labels %in% c("all", "factors"), "label", "raw")
   cb_export <- ifelse(export_labels == "all", TRUE, FALSE)
   
-  ## If database is not longitudinal or events not specified, take all events
-  if(is.null(events)){
-    postForm(
-      "https://redcap.vanderbilt.edu/api/",   ## URL for REDCap instance
-      token = Sys.getenv(rctoken),            ## token for specific database
-      content = "record",                     ## export records
-      format = "csv",                         ## export as CSV
-      fields = id_field,                      ## ID variable - need on every row
-      forms = paste(forms, collapse = ","),   ## which form(s) to export?
-      rawOrLabel = factor_export,             ## exp. factor labels vs numbers
-      exportCheckboxLabel = cb_export,        ## exp. NA/checkbox labels vs U/C
-      exportDataAccessGroups = FALSE          ## don't need data access grps
-    )
-  ## Otherwise, take only specified events
-  } else{
-    postForm(
-      "https://redcap.vanderbilt.edu/api/",   ## URL for REDCap instance
-      token = Sys.getenv(rctoken),            ## token for specific database
-      content = "record",                     ## export records
-      format = "csv",                         ## export as CSV
-      fields = id_field,                      ## ID variable - need on every row
-      forms = paste(forms, collapse = ","),   ## which form(s) to export?
-      events = paste(events, collapse = ","), ## which event(s) to export?
-      rawOrLabel = factor_export,             ## exp. factor labels vs numbers
-      exportCheckboxLabel = cb_export,        ## exp. NA/checkbox labels vs U/C
-      exportDataAccessGroups = FALSE          ## don't need data access grps
-    )
-  }
+  ## -- Construct postForm call ------------------------------------------------
+  ## If events, fields, and/or forms are specified, add line to specify which
+  ## of each to import
+  forms_line <-
+    ifelse(is.null(forms), "", 'forms = paste(forms, collapse = ","),')
+  fields_line <-
+    ifelse(is.null(fields),
+           "fields = id_field,", ## ID variable - need on every row
+           'fields = paste(fields, collapse = ","),')
+  events_line <-
+    ifelse(is.null(events), "", 'events = paste(events, collapse = ","),')
+  
+  ## Use glue() to construct a postForm call
+  pF_call <- glue(
+    'postForm(
+       "https://redcap.vanderbilt.edu/api/",   ## URL for REDCap instance
+       token = Sys.getenv("{rctoken}"),        ## token for specific database
+       content = "record",                     ## export records
+       format = "csv",                         ## export as CSV
+       {forms_line}
+       {fields_line}
+       {events_line}
+       rawOrLabel = "{factor_export}",         ## exp. factor labels vs numbers
+       exportCheckboxLabel = {cb_export},      ## exp. NA/checkbox labels vs U/C
+       exportDataAccessGroups = FALSE          ## do not need data access grps
+     )'
+  )
+  
+  ## Return evaluated postForm() call
+  return(eval(parse(text = pF_call)))
 }
 
 ## Example: Read in enrollment qual + dates tracking from only enrollment day
@@ -122,10 +127,8 @@ get_pF <- function(
 ## head(tmp_df)
 
 ## -- Wrapper to read in data, turn into data.frame, remove extra _s -----------
-import_df <- function(rctoken, id_field, forms, ...){
-  tmp_pF <- get_pF(
-    rctoken, id_field = id_field, forms = forms, ...
-  )
+import_df <- function(rctoken, id_field, ...){
+  tmp_pF <- get_pF(rctoken, id_field = id_field, ... )
   tmp_csv <- get_csv(tmp_pF)
   
   ## REDCap loves to use so many underscores; one per instance seems like plenty
