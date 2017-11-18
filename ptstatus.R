@@ -178,117 +178,174 @@ inhosp_df <- inhosp_raw %>%
 
 ## -- Combine exclusion, in-hospital data for one master dataset ---------------
 ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
+  ## Filter out test patients
+  filter(!str_detect(id, "TEST")) %>%
   select(id, study_site, protocol, exc_date:exc_notes,
          inclusion_met_date:orgfail_shock, iqcode_score,
-         everything())
-## Next up: Indicators for status at each time point; format dates/times
+         everything()) %>%
+  ## Format dates/times
+  mutate_at(c("inclusion_met_date", "enroll_time", "randomization_time",
+              "disqualification_time", "death_time", "hospdis_time",
+              "icudis_1_time"),
+            ymd_hm) %>%
+  mutate_at(c("exc_date", "studywd_time"), ymd) %>%
+  ## Add exclusion for high IQCODE, combine related exclusions
+  mutate(
+    exc_13_iqcode = as.numeric(
+      (!is.na(iqcode_score) & iqcode_score >= 4.5) & is.na(randomization_time)
+    ),
+    ## Categories per TGirard, 11-8-2017: 2a+2b; 3+4; 9c+9e+9f
+    exc_2_pregbf = as.numeric(exc_2a_pregnancy | exc_2b_breastfeed),
+    exc_34_neuro = as.numeric(exc_3_dementia | exc_4_deficit),
+    exc_9cef_time = as.numeric(
+      exc_9c_unable_nosurr | exc_9e_72h_nosurr | exc_9f_120h_coma
+    )
+  )
+
+## -- Create indicators for status at specific time points ---------------------
+## Definitions:
+## Screened: Screened within 72 hours of meeting inclusion criteria. Leaves
+##           out exclusion 1 (rapidly resolving organ failure) and 9d (72h
+##           eligibility period exceeded before screening)
+## Excluded, ever: Screened, and met >=1 exclusion criteria (including IQCODE
+##                 >= 4.5) without being randomized (subset of screened)
+## Excluded immediately: Screened, and met >=1 exclusion before being enrolled
+##                       (no enrollment time)
+## Excluded later: Screened, enrolled, and was found to meet >=1 exclusion
+##                 after enrollment (eg, high IQCODE, or discovery of
+##                 maintenance antipsychotic use) without being randomized
+##   excluded immediately + excluded later = excluded ever
+## Approached: Screened, not immediately excluded
+##             (excluded imm. + approached = screened)
+## Refused: Screened, approached, & pt/surrogate approached but refused consent
+##          (subset of approached)
+## Enrolled: Screened/approached, no refusal, enrollment date recorded
+##           (refused + enrolled = approached) **not currently true d/t 44 patients with no exclusion **
+## Disqualified: Enrolled, but not randomized + disqualification date
+## Randomized: Enrolled, randomized + randomization date
+##             (disqualified + randomized = enrolled)
+## Ever excluded + refused + randomized + disqualified = screened
+## **** not currently true; recheck this after those no-exclusion patients are handled ****
+## Received study drug: (TBD)
 
 
+## Prep: Create list of all "official" exclusions. Leaves out:
+## - 1: rapidly resolving organ failure (patient does not meet incl. criteria)
+## - 9d: no screening within 72h of meeting inclusion
+## - 9b: patient/surrogate refusal
+## 1, 9d don't meet screening def of "met inc criteria + screened within 72h"
+## 9b is not an exclusion in the CONSORT sense; patient met all inclusion
+## criteria, no other exclusions, and was approached
+not_exclusions <- c("1", "9b", "9d")
 
+## Variables listed as exclusion options in database
+possible_exclusions <- str_subset(names(ptstatus_df), "^exc\\_[0-9]+")
 
+## Remove variables which are not considered official exclusion criteria
+exclusion_rsns <-
+  possible_exclusions[
+    !(map_chr(str_split(possible_exclusions, fixed("_")), ~ .[2]) %in%
+        not_exclusions)
+    ]
 
+## Create indicators
+ptstatus_df <- ptstatus_df %>%
+  mutate(
+    ## Screened: met inclusion criteria & screened within 72h
+    screened = ifelse(is.na(exc_1_resolving) & is.na(exc_9d_72h_noscreen), NA,
+                      !((!is.na(exc_1_resolving) & exc_1_resolving) |
+                          (!is.na(exc_9d_72h_noscreen) & exc_9d_72h_noscreen))),
+    ## Ever excluded:
+    ##  Screened + met any exc criteria other than refusal + not randomized
+    excluded_ever = ifelse(
+      rowSums(!is.na(.[, exclusion_rsns])) == 0, NA,
+      screened &
+        rowSums(.[, exclusion_rsns], na.rm = TRUE) > 0 &
+        is.na(randomization_time)
+    ),
+    ## Excluded immediately:
+    ##   Screened + met any exclusion but refusal + was not enrolled
+    excluded_imm = ifelse(
+      rowSums(!is.na(.[, exclusion_rsns])) == 0, NA,
+      screened &
+        rowSums(.[, exclusion_rsns], na.rm = TRUE) > 0 &
+        is.na(enroll_time)
+    ),
+    ## Excluded later: Enrolled, but met >=1 exclusion criteria (including
+    ## IQCODE) without being randomized
+    excluded_later = ifelse(
+      rowSums(!is.na(.[, exclusion_rsns])) == 0, NA,
+      screened & !is.na(enroll_time) & is.na(randomization_time) &
+        rowSums(.[, exclusion_rsns], na.rm = TRUE) > 0
+    ),
+    ## Approached: screened and not immediately excluded
+    approached = ifelse(
+      is.na(exc_9b_refusal_ptsurr), NA, screened & !excluded_imm
+    ),
+    ## Refused: Screened, not immediately excluded, approached, refusal
+    refused = screened & !excluded_imm & approached & exc_9b_refusal_ptsurr,
+    ## Enrolled: Screened, approached, did not refuse, enrollment time rec.
+    enrolled = screened & approached & !refused & !is.na(enroll_time),
+    ## Disqualified: screened, approached, did not refuse, enrolled,
+    ##   not randomized + DQ time entered
+    disqualified = screened & approached & !refused & enrolled &
+      !randomized_yn & !is.na(disqualification_time),
+    ## Randomized: screened, approached, did not refuse, enrolled,
+    ##   randomized + time recorded
+    randomized = screened & approached & !refused & enrolled &
+      randomized_yn & !is.na(randomization_time)
+  )
 
+## -- Data checks --------------------------------------------------------------
+test_df <- ptstatus_df %>%
+  mutate(
+    ## Calculate total number of exclusions
+    exc_number = rowSums(.[, exclusion_rsns]),
+    exc_none = screened & !excluded_ever & !refused & !enrolled
+  )
 
-
-
-
-
-
-# ## Prep to summarize exclusions for CONSORT table
-# ## Create list of all exclusions, except:
-# ## - 1: rapidly resolving organ failure (patient does not meet incl. criteria)
-# ## - 9d: no screening within 72h of meeting inclusion
-# ## - 9b: patient/surrogate refusal
-# ## 1, 9d don't meet screening def of "met inc criteria + screened within 72h"
-# ## 9b is not an exclusion in the CONSORT sense; patient met all inclusion
-# ## criteria, no other exclusions, and was approached
-# not_exclusions <- c("1", "9b", "9d")
-# 
-# ## Variables listed as exclusion options in database
-# possible_exclusions <- str_subset(names(exc_df), "^exc\\_[0-9]+")
-# 
-# ## Remove variables which are not considered official exclusion criteria
-# final_exclusions <-
-#   possible_exclusions[
-#     !(map_chr(str_split(possible_exclusions, fixed("_")), ~ .[2]) %in%
-#         not_exclusions)
-#     ]
-# 
-# exc_df <- exc_df %>%
-#   mutate(
-#     ## Combine related exclusions
-#     ## Categories per TGirard, 11-8-2017: 2a+2b; 3+4; 9c+9e+9f
-#     exc_2_pregbf = as.numeric(exc_2a_pregnancy | exc_2b_breastfeed),
-#     exc_34_neuro = as.numeric(exc_3_dementia | exc_4_deficit),
-#     exc_9cef_time = as.numeric(
-#       exc_9c_unable_nosurr | exc_9e_72h_nosurr | exc_9f_120h_coma
-#     ),
-#     ## Indicator for no exclusions checked, including rapidly reversible,
-#     ## 72h, refusal - this shouldn't happen
-#     exc_none = rowSums(.[, possible_exclusions]) == 0,
-#     
-#     ## How many official exclusions checked? (not counting 1, 9d, 9b)
-#     exc_number = rowSums(.[, final_exclusions]),
-#     
-#     ## Indicator for "screened": must be screened within 72 hours of meeting
-#     ## inclusion criteria. Leaves out exclusion 1 (rapidly resolving organ
-#     ## failure) and 9d (72h eligibility period exceeded before screening).
-#     screened = !(exc_1_resolving | exc_9d_72h_noscreen),
-#     
-#     ## Indicator for "excluded": must be screened and meet >=1 exc criteria
-#     excluded = screened & rowSums(.[,final_exclusions]) > 0,
-#     
-#     ## Indicator for "approached": Patient had no other exclusions and they or
-#     ## surrogate was approached for consent
-#     approached = screened & !excluded & exc_9b_refusal_ptsurr,
-#     
-#     ## Indicator for "refused": Patient/surrogate was approached but refused
-#     ## consent (should match `approached` until we add in enrollment log)
-#     refused = screened & !excluded & approached & exc_9b_refusal_ptsurr
-#   )
-# 
-# ## -- Data checks --------------------------------------------------------------
-# ## Tell me about the patients approached but who also had an exclusion - want to
-# ## make sure these make sense (often, exclusion developed while family was
-# ## considering decision)
-# approached_exc <- exc_df %>%
-#   filter(exc_9b_refusal_ptsurr & exc_number > 0)
-# 
 # ## No one should have 0 exclusions checked. Write a subset of these IDs to CSV
 # write_csv(
-#   subset(exc_df,
+#   subset(test_df,
 #          exc_none,
-#          select = c(exc_id, exc_site, exc_date, exc_other, exc_notes)),
+#          select = c(id, study_site, exc_date, exc_other, exc_notes)),
 #   path = "no_exclusions.csv"
 # )
-# 
-# ## -- Summarize all recorded exclusions among patients officially screened -----
-# ## Summarize % of exclusions
-# main_exclusions <- c(
-#   paste(
-#     "exc",
-#     c("1_resolving", "2_pregbf", "34_neuro", "5_torsadesqtc", "6_maintmeds",
-#       "7_nmsallergy", "8_death24", "9a_refusal_md", # "9b_refusal_ptsurr",
-#       "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison",
-#       "12_coenroll", "99_other", "none"),
-#     sep = "_"
-#   ),
-#   "screened", "excluded", "approached", "refused"
-# )
-# 
-# summarize_exc <- exc_df %>%
-#   filter(screened) %>%
-#   select(one_of(main_exclusions)) %>%
-#   gather(key = exclusion, value = yn) %>%
-#   group_by(exclusion) %>%
-#   summarise_all(funs(pts = sum, pct = mean)) %>%
-#   mutate(pct = pct * 100,
-#          order = ifelse(exclusion == "screened", 1,
-#                  ifelse(exclusion == "excluded", 2,
-#                  ifelse(exclusion == "approached", 4,
-#                  ifelse(exclusion == "refused", 5, 3))))) %>%
-#   arrange(order, desc(pct))
-# 
-# ## -- Save final exclusions dataset --------------------------------------------
-# # save(exc_df, file = "analysisdata/exclusions.Rdata")
-# 
+
+## -- Summarize all recorded exclusions among patients officially screened -----
+## Summarize % of exclusions
+main_exclusions <- c(
+  paste(
+    "exc",
+    c("1_resolving", "2_pregbf", "34_neuro", "5_torsadesqtc", "6_maintmeds",
+      "7_nmsallergy", "8_death24", "9a_refusal_md", # "9b_refusal_ptsurr",
+      "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison",
+      "12_coenroll", "13_iqcode", "99_other", "none"),
+    sep = "_"
+  ),
+  "screened", "excluded_ever", "excluded_imm", "approached", "refused",
+  "enrolled", "excluded_later", "randomized", "disqualified"
+)
+
+summarize_exc <- test_df %>%
+  filter(screened) %>%
+  select(one_of(main_exclusions)) %>%
+  gather(key = exclusion, value = yn) %>%
+  group_by(exclusion) %>%
+  summarise_all(funs(pts = sum, pct = mean), na.rm = TRUE) %>%
+  mutate(pct = pct * 100,
+         order = ifelse(exclusion == "screened", 1,
+                 ifelse(exclusion == "excluded_ever", 2,
+                 ifelse(exclusion == "excluded_imm", 3,
+                 ifelse(exclusion == "approached", 5,
+                 ifelse(exclusion == "refused", 6,
+                 ifelse(exclusion == "enrolled", 7,
+                 ifelse(exclusion == "excluded_later", 8,
+                 ifelse(exclusion == "disqualified", 9,
+                 ifelse(exclusion == "randomized", 10, 4))))))))),
+         exclusion =
+           ifelse(exclusion == "exc_none", "exc_none [CHECK THESE]", exclusion)
+  ) %>%
+  arrange(order, desc(pct)) %>%
+  select(-order)
+
