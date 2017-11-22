@@ -435,7 +435,16 @@ ptstatus_df <- ptstatus_df %>%
     vars(ever_studydrug:held_teamref), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
   ## Change exclusion indicators to logicals, not 0/1
-  mutate_at(vars(adult_patient:orgfail_shock, matches("^exc\\_[0-9]")), as.logical)
+  mutate_at(
+    vars(
+      adult_patient:orgfail_shock, ## qualification criteria
+      matches("^rand\\_"),         ## organ failure(s) at randomization
+      matches("^exc\\_[0-9]")      ## exclusions
+    ),
+    as.logical
+  )
+
+##### To do: in-hospital withdrawal, discharge, death
 
 ## -- Data checks --------------------------------------------------------------
 test_df <- ptstatus_df %>%
@@ -461,7 +470,7 @@ main_exclusions <- c(
     c("1_resolving", "2_pregbf", "34_neuro", "5_torsadesqtc", "6_maintmeds",
       "7_nmsallergy", "8_death24", "9a_refusal_md", # "9b_refusal_ptsurr",
       "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison",
-      "12_coenroll", "13_iqcode", "99_other", "none"),
+      "12_coenroll", "13_iqcode", "14_protocol", "99_other", "none"),
     sep = "_"
   ),
   "screened", "excluded_ever", "excluded_imm", "approached", "refused",
