@@ -62,6 +62,21 @@ inhosp_raw <- import_df(
 ) %>%
   select(-redcap_event_name, -enrollment_qualification_form_complete)
 
+## -- Download data needed to determine whether patient ever got study drug ----
+drug_raw <- import_df(
+  rctoken = "MINDUSA_IH_TOKEN",
+  id_field = "id",
+  export_labels = "none",
+  fields = c(
+    "id", "redcap_event_name",
+    paste0("study_drug_given_", c(1:2, "3a")),
+    paste0("dose_held_reason_", 1:3)
+  )
+) %>%
+  ## Study drug could not be given on "randomziation" or "prior to d/c" events
+  filter(!(redcap_event_name %in%
+             c("randomization_arm_1", "prior_to_hospital_arm_1")))
+
 ## -- assertr checks for raw data ----------------------------------------------
 ## - All variables should always be present except for exc_other, exc_notes
 ## - All exclusion variables should be non-missing, numeric, 0/1
@@ -87,6 +102,11 @@ inhosp_raw_checks <- inhosp_raw %>%
   assert(in_set(1:10), protocol) %>%
   assert(in_set(0:1), adult_patient:nosurr_avail) %>%
   assert(in_set(1:6), matches("^iqcode\\_[0-9]+\\_ph$"))
+
+drug_raw_checks <- drug_raw %>%
+  filter(!str_detect(toupper(id), "TEST")) %>%
+  assert(in_set(0:1), matches("^study\\_drug\\_given\\_")) %>%
+  assert(in_set(c(1:10, 99)), matches("^dose\\_held\\_reason"))
 
 ## -- Data management for exclusions -------------------------------------------
 ## Exclusions in exclusion log have partners in in-hospital database. Rename
@@ -202,6 +222,82 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
     )
   )
 
+## -- Indicator for whether patient ever got study drug ------------------------
+drug_given_df <- drug_raw %>%
+  ## Dose 3 doesn't follow naming convention
+  rename(study_drug_given_3 = "study_drug_given_3a") %>%
+  
+  ## Only want indicators for whether drug was given
+  gather(key = drug_var, value = drug_value, matches("^study\\_drug\\_given")) %>%
+  
+  ## Calculate number of drug doses given per patient
+  group_by(id) %>%
+  summarise(drug_doses = sum(drug_value, na.rm = TRUE)) %>%
+  
+  ## Logical indicator for whether patient got >=1 dose
+  mutate(ever_studydrug = !(drug_doses == 0))
+
+## -- Indicator for whether pt ever had drug held for specific reasons ---------
+drug_rsnheld_df <- drug_raw %>%
+  ## Only want variables pertaining to reason study drug held
+  select(id, matches("^dose\\_held\\_reason")) %>%
+  
+  ## Reshape to long format (all 3 doses in one col), drop indicator for dose #
+  gather(key = drug_var, value = drug_rsn, matches("^dose\\_held\\_reason")) %>%
+  select(-drug_var) %>%
+  
+  ## Drop doses where no reason for hold marked
+  filter(!is.na(drug_rsn)) %>%
+  
+  ## Replace numeric codes with factor labels from database
+  mutate(
+    drug_rsn = factor(
+      drug_rsn,
+      levels = get_levels_ih("dose_held_reason_1"),
+      labels = names(get_levels_ih("dose_held_reason_1"))
+    )
+  ) %>%
+  
+  ## Get counts of number of times drug held for each reason
+  add_count(id, drug_rsn) %>%
+  distinct %>%
+  
+  ## We want one row per patient per potential reason for hold
+  right_join(
+    cross_df(
+      list("id" = sort(unique(drug_raw$id)),
+           "drug_rsn" = names(get_levels_ih("dose_held_reason_1")))
+    ),
+    by = c("id", "drug_rsn")
+  ) %>%
+  
+  mutate(
+    ## Indicator for whether drug ever held for a given reason
+    held = !is.na(n),
+
+    ## Shortened version of reason for hold, for transforming to wide format    
+    drug_rsn_short = case_when(
+      drug_rsn == "Delirium resolving/resolved" ~ "resolving",
+      drug_rsn == "QTc Prolongation" ~ "qtc",
+      drug_rsn == "Oversedation" ~ "oversed",
+      drug_rsn == "Extrapyramidal symptoms" ~ "eps",
+      drug_rsn == "Dystonia" ~ "dystonia",
+      drug_rsn == "Adverse event" ~ "ae",
+      drug_rsn == "ICU Discharge" ~ "icudc",
+      drug_rsn == "Patient off floor" ~ "offfloor",
+      drug_rsn == "Managing team refused" ~ "teamref",
+      drug_rsn == "Patient/family refused" ~ "ptfamref",
+      TRUE ~ "other"
+    )
+  ) %>%
+  
+  ## Reshape to wide format
+  select(id, held, drug_rsn_short) %>%
+  spread(key = drug_rsn_short, value = held)
+
+names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
+  paste0("held_", names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)])
+
 ## -- Create indicators for status at specific time points ---------------------
 ## Definitions:
 ## Screened: Screened within 72 hours of meeting inclusion criteria. Leaves
@@ -226,7 +322,8 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
 ##             (disqualified + randomized = enrolled)
 ## Ever excluded + refused + randomized + disqualified = screened
 ## **** not currently true; recheck this after those no-exclusion patients are handled ****
-## Received study drug: (TBD)
+## Received study drug: Randomized and received at least one dose of study drug
+## Did not receive study drug: Randomized, but never received a dose of s. drug
 
 
 ## Prep: Create list of all "official" exclusions. Leaves out:
@@ -251,10 +348,15 @@ exclusion_rsns <-
 ## Create indicators
 ptstatus_df <- ptstatus_df %>%
   mutate(
-    ## Screened: met inclusion criteria & screened within 72h
-    screened = ifelse(is.na(exc_1_resolving) & is.na(exc_9d_72h_noscreen), NA,
-                      !((!is.na(exc_1_resolving) & exc_1_resolving) |
-                          (!is.na(exc_9d_72h_noscreen) & exc_9d_72h_noscreen))),
+    ## Screened: met inclusion criteria & screened within 72h, *or* had
+    ##   randomization time
+    ## (1 patient was enrolled 7h past 72h window and was eventually randomized)
+    screened = ifelse(
+      is.na(exc_1_resolving) & is.na(exc_9d_72h_noscreen), NA,
+      (!((!is.na(exc_1_resolving) & exc_1_resolving) |
+           (!is.na(exc_9d_72h_noscreen) & exc_9d_72h_noscreen))) |
+        !is.na(enroll_time)
+    ),
     ## Ever excluded:
     ##  Screened + met any exc criteria other than refusal + not randomized
     excluded_ever = ifelse(
@@ -294,7 +396,19 @@ ptstatus_df <- ptstatus_df %>%
     ##   randomized + time recorded
     randomized = screened & approached & !refused & enrolled &
       randomized_yn & !is.na(randomization_time)
-  )
+  ) %>%
+  ## Add indicators for whether patient ever got study drug + ever had it held
+  ##   for specific reasons, + # doses of study drug
+  left_join(select(drug_given_df, id, ever_studydrug, drug_doses), by = "id") %>%
+  left_join(drug_rsnheld_df, by = "id") %>%
+  
+  ## All in-hospital indicators should be present for all patients; set
+  ##   in-hospital indicators for excluded patients to FALSE
+  mutate_at(
+    vars(ever_studydrug:held_teamref), funs(ifelse(is.na(.), FALSE, .))
+  ) %>%
+  ## Change exclusion indicators to logicals, not 0/1
+  mutate_at(vars(matches("^exc\\_[0-9]")), as.logical)
 
 ## -- Data checks --------------------------------------------------------------
 test_df <- ptstatus_df %>%
@@ -324,7 +438,7 @@ main_exclusions <- c(
     sep = "_"
   ),
   "screened", "excluded_ever", "excluded_imm", "approached", "refused",
-  "enrolled", "excluded_later", "randomized", "disqualified"
+  "enrolled", "excluded_later", "disqualified", "randomized", "ever_studydrug"
 )
 
 summarize_exc <- test_df %>%
@@ -342,10 +456,14 @@ summarize_exc <- test_df %>%
                  ifelse(exclusion == "enrolled", 7,
                  ifelse(exclusion == "excluded_later", 8,
                  ifelse(exclusion == "disqualified", 9,
-                 ifelse(exclusion == "randomized", 10, 4))))))))),
+                 ifelse(exclusion == "randomized", 10,
+                 ifelse(exclusion == "ever_studydrug", 11, 4)))))))))),
          exclusion =
            ifelse(exclusion == "exc_none", "exc_none [CHECK THESE]", exclusion)
   ) %>%
   arrange(order, desc(pct)) %>%
   select(-order)
 
+## Data weirdness thus far:
+## - YAL-060: missing screened indicator + others d/t incomplete enroll. qual form
+## - MON-071: missing approached ind. + others d/t missing exclusion 9b
