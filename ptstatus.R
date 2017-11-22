@@ -304,7 +304,7 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 ##           out exclusion 1 (rapidly resolving organ failure) and 9d (72h
 ##           eligibility period exceeded before screening)
 ## Excluded, ever: Screened, and met >=1 exclusion criteria (including IQCODE
-##                 >= 4.5) without being randomized (subset of screened)
+##                 >= 4.5) without being randomized (subset of screened) **** not currently true - YAL-060
 ## Excluded immediately: Screened, and met >=1 exclusion before being enrolled
 ##                       (no enrollment time)
 ## Excluded later: Screened, enrolled, and was found to meet >=1 exclusion
@@ -312,11 +312,11 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 ##                 maintenance antipsychotic use) without being randomized
 ##   excluded immediately + excluded later = excluded ever
 ## Approached: Screened, not immediately excluded
-##             (excluded imm. + approached = screened)
+##             (excluded imm. + approached = screened; **** not currently true - MON-071)
 ## Refused: Screened, approached, & pt/surrogate approached but refused consent
 ##          (subset of approached)
 ## Enrolled: Screened/approached, no refusal, enrollment date recorded
-##           (refused + enrolled = approached) **not currently true d/t 44 patients with no exclusion **
+##           (refused + enrolled = approached) **** not currently true d/t 44 patients with no exclusion; currently approached, but neither enrolled nor randomized
 ## Disqualified: Enrolled, but not randomized + disqualification date
 ## Randomized: Enrolled, randomized + randomization date
 ##             (disqualified + randomized = enrolled)
@@ -324,7 +324,7 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 ## **** not currently true; recheck this after those no-exclusion patients are handled ****
 ## Received study drug: Randomized and received at least one dose of study drug
 ## Did not receive study drug: Randomized, but never received a dose of s. drug
-
+##   (subset of randomized) **** not currently true; MON-071
 
 ## Prep: Create list of all "official" exclusions. Leaves out:
 ## - 1: rapidly resolving organ failure (patient does not meet incl. criteria)
