@@ -62,6 +62,18 @@ inhosp_raw <- import_df(
 ) %>%
   select(-redcap_event_name, -enrollment_qualification_form_complete)
 
+randqual_raw <- import_df(
+  rctoken = "MINDUSA_IH_TOKEN",
+  id_field = "id",
+  export_labels = "none",
+  fields = c("id", "organ_failure_present", "randomized_no_reason"),
+  events = "randomization_arm_1"
+) %>%
+  rename(rand_mv = "organ_failure_present_1",
+         rand_nippv = "organ_failure_present_2",
+         rand_shock = "organ_failure_present_3",
+         rand_noorgfailure = "organ_failure_present_0")
+
 ## -- Download data needed to determine whether patient ever got study drug ----
 drug_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
@@ -150,8 +162,11 @@ exc_df <- exc_raw %>%
   )
 
 inhosp_df <- inhosp_raw %>%
+  ## Add info from randomization
+  left_join(randqual_raw %>% select(-redcap_event_name), by = "id") %>%
   mutate(
-    ## Make study site and protocol factors, using levels from data dictionary
+    ## Make study site, protocol, reason for disqualification factors
+    ##   using levels from data dictionary
     study_site = factor(study_site,
                         levels = get_levels_ih("study_site"),
                         labels = names(get_levels_ih("study_site"))),
@@ -159,6 +174,15 @@ inhosp_df <- inhosp_raw %>%
       protocol,
       levels = get_levels_ih("protocol"),
       labels = names(get_levels_ih("protocol"))
+    ),
+    randomized_no_reason = factor(
+      randomized_no_reason,
+      levels = get_levels_ih("randomized_no_reason"),
+      ## Labels in database are long; use custom ones
+      labels = c("No delirium within 5 days",
+                 "Exclusion identified",
+                 "ICU discharge before delirium",
+                 "Died/withdrew before delirium")
     ),
     
     ## Force IDs to use "-" as separator, be in all caps
@@ -209,11 +233,14 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
               "icudis_1_time"),
             ymd_hm) %>%
   mutate_at(c("exc_date", "studywd_time"), ymd) %>%
-  ## Add exclusion for high IQCODE, combine related exclusions
+  ## Add exclusions for high IQCODE, protocol violation; combine related exclusions
   mutate(
     exc_13_iqcode = as.numeric(
       (!is.na(iqcode_score) & iqcode_score >= 4.5) & is.na(randomization_time)
     ),
+    ## Currently only one patient meets this exclusion;
+    ##   documented in REDCap post-it + NTF
+    exc_14_protocol = as.numeric(id == "VAN-245"),
     ## Categories per TGirard, 11-8-2017: 2a+2b; 3+4; 9c+9e+9f
     exc_2_pregbf = as.numeric(exc_2a_pregnancy | exc_2b_breastfeed),
     exc_34_neuro = as.numeric(exc_3_dementia | exc_4_deficit),
@@ -408,7 +435,7 @@ ptstatus_df <- ptstatus_df %>%
     vars(ever_studydrug:held_teamref), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
   ## Change exclusion indicators to logicals, not 0/1
-  mutate_at(vars(matches("^exc\\_[0-9]")), as.logical)
+  mutate_at(vars(adult_patient:orgfail_shock, matches("^exc\\_[0-9]")), as.logical)
 
 ## -- Data checks --------------------------------------------------------------
 test_df <- ptstatus_df %>%
