@@ -11,6 +11,9 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
+## Create partial-ed version of sum()
+sum_na <- partial(sum, na.rm = TRUE)
+
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
 exc_dd <- get_datadict("MINDUSA_EXC_TOKEN")
@@ -227,12 +230,20 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
   select(id, study_site, protocol, exc_date:exc_notes,
          inclusion_met_date:orgfail_shock, iqcode_score,
          everything()) %>%
+  
   ## Format dates/times
   mutate_at(c("inclusion_met_date", "enroll_time", "randomization_time",
               "disqualification_time", "death_time", "hospdis_time",
               "icudis_1_time"),
             ymd_hm) %>%
   mutate_at(c("exc_date", "studywd_time"), ymd) %>%
+  rename(studywd_date = "studywd_time") %>% ## no time included
+  mutate(enroll_date = as_date(enroll_time),
+         randomization_date = as_date(randomization_time),
+         disqualification_date = as_date(disqualification_time),
+         hospdis_date = as_date(hospdis_time),
+         death_date = as_date(death_time)) %>%
+  
   ## Add exclusions for high IQCODE, protocol violation; combine related exclusions
   mutate(
     exc_13_iqcode = as.numeric(
@@ -327,6 +338,8 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 
 ## -- Create indicators for status at specific time points ---------------------
 ## Definitions:
+##
+## Screening + enrollment:
 ## Screened: Screened within 72 hours of meeting inclusion criteria. Leaves
 ##           out exclusion 1 (rapidly resolving organ failure) and 9d (72h
 ##           eligibility period exceeded before screening)
@@ -344,6 +357,8 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 ##          (subset of approached)
 ## Enrolled: Screened/approached, no refusal, enrollment date recorded
 ##           (refused + enrolled = approached) **** not currently true d/t 44 patients with no exclusion; currently approached, but neither enrolled nor randomized
+##
+## Randomization + study drug:
 ## Disqualified: Enrolled, but not randomized + disqualification date
 ## Randomized: Enrolled, randomized + randomization date
 ##             (disqualified + randomized = enrolled)
@@ -352,6 +367,15 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 ## Received study drug: Randomized and received at least one dose of study drug
 ## Did not receive study drug: Randomized, but never received a dose of s. drug
 ##   (subset of randomized) **** not currently true; MON-071
+##
+## End of in-hospital phase:
+## Eligible for followup: Randomized + discharged alive from hospital, with no
+##                        withdrawal date
+## Died in hospital: Randomized + death date prior to hospital discharge date,
+##                   or no hospital discharge date recorded
+## Withdrew in hospital: Randomized + withdrawal date prior to hospital
+##                       discharge date, or no hospital discharge date recorded
+## Elig for f/u + died in hosp. + w/d [and did not die] in hospital = randomized
 
 ## Prep: Create list of all "official" exclusions. Leaves out:
 ## - 1: rapidly resolving organ failure (patient does not meet incl. criteria)
@@ -415,6 +439,8 @@ ptstatus_df <- ptstatus_df %>%
     refused = screened & !excluded_imm & approached & exc_9b_refusal_ptsurr,
     ## Enrolled: Screened, approached, did not refuse, enrollment time rec.
     enrolled = screened & approached & !refused & !is.na(enroll_time),
+    
+    ## Randomization vs disqualification
     ## Disqualified: screened, approached, did not refuse, enrolled,
     ##   not randomized + DQ time entered
     disqualified = screened & approached & !refused & enrolled &
@@ -422,7 +448,38 @@ ptstatus_df <- ptstatus_df %>%
     ## Randomized: screened, approached, did not refuse, enrolled,
     ##   randomized + time recorded
     randomized = screened & approached & !refused & enrolled &
-      randomized_yn & !is.na(randomization_time)
+      randomized_yn & !is.na(randomization_time),
+    
+    ## End of in-hospital phase
+    ## Died in hospital: randomized + died + died prior to hospital discharge
+    ## Followup deaths are recorded in this database, so need to differentiate
+    died_inhosp = randomized &
+      death == 1 & !is.na(death_time) &
+      (is.na(hospdis_time) | death_time <= hospdis_time),
+    
+    ## Withdrew in hospital: randomized + withdrew + w/d date prior to discharge
+    wd_inhosp = randomized &
+      studywd == 1 & !is.na(studywd_date) &
+      (is.na(hospdis_date) | studywd_date <= hospdis_date),
+    
+    ## Patients can both die and withdraw in-hospital
+    
+    ## Eligible for followup: randomized, survived hospital stay, no withdrawal
+    elig_fu = randomized & !died_inhosp & !wd_inhosp & hospdis == 1,
+    
+    ## Overall status at end of in-hospital period for randomized patients
+    ##  If patient both died and withdrew in hospital, considered deceased (we
+    ##  know what happened to them)
+    dc_status = factor(
+      ifelse(!randomized, NA,
+      ifelse(elig_fu, 1,
+      ifelse(died_inhosp, 2, 3))),
+      levels = 1:3,
+      labels = c("Eligible for follow-up",
+                 "Died in hospital",
+                 "Withdrew in hospital")
+    )
+    
   ) %>%
   ## Add indicators for whether patient ever got study drug + ever had it held
   ##   for specific reasons, + # doses of study drug
@@ -444,9 +501,25 @@ ptstatus_df <- ptstatus_df %>%
     as.logical
   )
 
-##### To do: in-hospital withdrawal, discharge, death
-
 ## -- Data checks --------------------------------------------------------------
+
+## All results are written to a text file, ptstatus_checks.txt
+sink("ptstatus_checks.txt")
+
+## All randomized patients should have status of died in-hospital, withdrew
+##  in-hospital, or eligible for followup; some will both withdraw and die in
+##  the hospital, but we want to check anyone else with >1 of these statuses.
+conflicting_dcstatus <- ptstatus_df %>%
+  mutate(dc_statuses = died_inhosp + wd_inhosp + elig_fu,
+         issue_flag = dc_statuses > 1 & !(died_inhosp & wd_inhosp)) %>%
+  filter(randomized & issue_flag)
+
+print_datachecks(
+  "Patients with >1 of died in hospital, w/d in hospital, & eligible for followup:",
+  conflicting_dcstatus
+)
+
+## -- Summarize exclusions + statuses among those officially screened ----------
 test_df <- ptstatus_df %>%
   mutate(
     ## Calculate total number of exclusions
@@ -462,7 +535,6 @@ test_df <- ptstatus_df %>%
 #   path = "no_exclusions.csv"
 # )
 
-## -- Summarize all recorded exclusions among patients officially screened -----
 ## Summarize % of exclusions
 main_exclusions <- c(
   paste(
@@ -474,7 +546,8 @@ main_exclusions <- c(
     sep = "_"
   ),
   "screened", "excluded_ever", "excluded_imm", "approached", "refused",
-  "enrolled", "excluded_later", "disqualified", "randomized", "ever_studydrug"
+  "enrolled", "excluded_later", "disqualified", "randomized", "ever_studydrug",
+  "died_inhosp", "wd_inhosp", "elig_fu"
 )
 
 summarize_exc <- test_df %>%
@@ -493,13 +566,102 @@ summarize_exc <- test_df %>%
                  ifelse(exclusion == "excluded_later", 8,
                  ifelse(exclusion == "disqualified", 9,
                  ifelse(exclusion == "randomized", 10,
-                 ifelse(exclusion == "ever_studydrug", 11, 4)))))))))),
+                 ifelse(exclusion == "ever_studydrug", 11,
+                 ifelse(exclusion == "died_inhosp", 12,
+                 ifelse(exclusion == "wd_inhosp", 13,
+                 ifelse(exclusion == "elig_fu", 14, 4))))))))))))),
          exclusion =
            ifelse(exclusion == "exc_none", "exc_none [CHECK THESE]", exclusion)
   ) %>%
   arrange(order, desc(pct)) %>%
   select(-order)
 
+print_datachecks("Summary of exclusions and patient statuses:", summarize_exc)
+
 ## Data weirdness thus far:
 ## - YAL-060: missing screened indicator + others d/t incomplete enroll. qual form
 ## - MON-071: missing approached ind. + others d/t missing exclusion 9b
+
+## -- Check totals of statuses -------------------------------------------------
+cat(
+  glue(
+    "Screening and Exclusions\n",
+    "Total patients screened: {sum_na(ptstatus_df$screened)}",
+    "  Patients excluded: {sum_na(ptstatus_df$excluded_ever)}",
+    "  Patients approached: {sum_na(ptstatus_df$approached)}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_ever) + sum_na(approached))}",
+    .sep = "\n"
+  )
+)
+
+cat(
+  glue(
+    "\n\n\nExclusion Details\n",
+    "Total patients excluded: {sum_na(ptstatus_df$excluded_ever)}",
+    "  Excluded at screening: {sum_na(ptstatus_df$excluded_imm)}",
+    "  Excluded after enrollment: {sum_na(ptstatus_df$excluded_later)}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(excluded_later))}",
+    .sep = "\n"
+  )
+)
+
+cat(
+  glue(
+    "\n\n\nApproaches, Refusals & Enrollment\n",
+    "Total patients approached: {sum_na(ptstatus_df$approached)}",
+    "  Patient/surrogate refusal: {sum_na(ptstatus_df$refused)}",
+    "  Enrolled: {sum_na(ptstatus_df$enrolled)}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(enrolled) + sum_na(refused))}",
+    .sep = "\n"
+  )
+)
+
+cat(
+  glue(
+    "\n\n\nRandomization & Disqualification\n",
+    "Total patients enrolled: {sum_na(ptstatus_df$enrolled)}",
+    "  Disqualified: {sum_na(ptstatus_df$disqualified)}",
+    "  Randomized: {sum_na(ptstatus_df$randomized)}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(disqualified) + sum_na(randomized))}",
+    .sep = "\n"
+  )
+)
+
+cat(
+  glue(
+    "\n\n\nTotal Screening through Randomization\n",
+    "Total patients screened: {sum_na(ptstatus_df$screened)}",
+    "  Excluded immediately: {sum_na(ptstatus_df$excluded_imm)}",
+    "  Refused consent: {sum_na(ptstatus_df$refused)}",
+    "  Enrolled: {sum_na(ptstatus_df$enrolled)}",
+    "    Randomized: {sum_na(ptstatus_df$randomized)}",
+    "    Disqualified: {sum_na(ptstatus_df$disqualified)}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(refused) + sum_na(disqualified) + sum_na(randomized))}",
+    .sep = "\n"
+  )
+)
+
+print_datachecks(
+  "\n\n\nPatients not randomized but who received study drug:",
+  subset(
+    ptstatus_df,
+    (is.na(randomized) | !randomized) & ever_studydrug,
+    select = c(
+      id, screened, approached, excluded_ever, randomized_yn, randomization_time
+    )
+  )
+)
+
+cat(
+  glue(
+    "End of In-Hospital Phase\n",
+    "Total patients randomized: {sum_na(ptstatus_df$randomized)}",
+    "  Died in hospital: {sum_na(ptstatus_df$dc_status == 'Died in hospital')}",
+    "  Withdrew in hospital: {sum_na(ptstatus_df$dc_status == 'Withdrew in hospital')}",
+    "  Eligible for follow-up: {sum_na(ptstatus_df$dc_status == 'Eligible for follow-up')}",
+    "  Should equal line 1: {sum(!is.na(ptstatus_df$dc_status))}",
+    .sep = "\n"
+  )
+)
+
+sink()
