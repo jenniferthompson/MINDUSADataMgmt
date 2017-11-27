@@ -665,3 +665,7 @@ cat(
 )
 
 sink()
+
+## -- Save final dataset :tada: ------------------------------------------------
+saveRDS(ptstatus_df, file = "analysisdata/rds/ptstatus.rds")
+write_csv(ptstatus_df, path = "analysisdata/csv/ptstatus.csv")
