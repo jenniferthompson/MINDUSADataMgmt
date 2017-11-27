@@ -167,3 +167,15 @@ get_factor_levels <- function(ddict, varname){
 ##   ddict = get_datadict("MINDUSA_EXC_TOKEN"),
 ##   varname = "exc_site"
 ## )
+
+## -- Function to print dataset + a cat() message above ------------------------
+## Intended use case: printing datasets with values to be inspected to text file
+print_datachecks <- function(msg, df){
+  cat(msg, "\n\n")
+  if(nrow(df) == 0){
+    cat("<none>")
+  } else{
+    print(as.data.frame(df), digits = 2)
+  }
+  cat("\n\n\n")
+}
