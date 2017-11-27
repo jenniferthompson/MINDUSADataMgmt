@@ -1,6 +1,7 @@
 # Data files contain PHI, should never be public
 analysisdata/
 *.csv
+*.txt
 
 # Should also never be public
 .Renviron
