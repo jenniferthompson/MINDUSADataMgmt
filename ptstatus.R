@@ -51,8 +51,7 @@ iqcode_vars <- sprintf("iqcode_%s_ph", 1:16)
 ## withdrew, was discharged
 datestrack_vars <- c(
   "enroll_time", "randomized_yn", "randomization_time", "disqualification_time",
-  "death", "death_time", "studywd", "studywd_time", "hospdis", "hospdis_time",
-  "icudis_1_time"
+  "death", "death_time", "studywd", "studywd_time", "hospdis", "hospdis_time"
 )
 
 inhosp_raw <- import_df(
@@ -233,8 +232,7 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
   
   ## Format dates/times
   mutate_at(c("inclusion_met_date", "enroll_time", "randomization_time",
-              "disqualification_time", "death_time", "hospdis_time",
-              "icudis_1_time"),
+              "disqualification_time", "death_time", "hospdis_time"),
             ymd_hm) %>%
   mutate_at(c("exc_date", "studywd_time"), ymd) %>%
   rename(studywd_date = "studywd_time") %>% ## no time included
@@ -249,9 +247,9 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
     exc_13_iqcode = as.numeric(
       (!is.na(iqcode_score) & iqcode_score >= 4.5) & is.na(randomization_time)
     ),
-    ## Currently only one patient meets this exclusion;
-    ##   documented in REDCap post-it + NTF
-    exc_14_protocol = as.numeric(id == "VAN-245"),
+    ## Currently only one patient meets this exclusion; documented in REDCap
+    ##   post-it + NTF. Will be excluded d/t screening failure.
+    exc_14_screen = as.numeric(id == "VAN-245"),
     ## Categories per TGirard, 11-8-2017: 2a+2b; 3+4; 9c+9e+9f
     exc_2_pregbf = as.numeric(exc_2a_pregnancy | exc_2b_breastfeed),
     exc_34_neuro = as.numeric(exc_3_dementia | exc_4_deficit),
@@ -542,7 +540,7 @@ main_exclusions <- c(
     c("1_resolving", "2_pregbf", "34_neuro", "5_torsadesqtc", "6_maintmeds",
       "7_nmsallergy", "8_death24", "9a_refusal_md", # "9b_refusal_ptsurr",
       "9d_72h_noscreen", "9cef_time", "10_blind_lang", "11_prison",
-      "12_coenroll", "13_iqcode", "14_protocol", "99_other", "none"),
+      "12_coenroll", "13_iqcode", "14_screen", "99_other", "none"),
     sep = "_"
   ),
   "screened", "excluded_ever", "excluded_imm", "approached", "refused",
@@ -667,5 +665,26 @@ cat(
 sink()
 
 ## -- Save final dataset :tada: ------------------------------------------------
+## Keep only what we need for this dataset: month/year of screening, enrollment,
+##  randomization; status indicators; reasons for exclusion, disqualification
+ptstatus_df <- ptstatus_df %>%
+  mutate(exc_month = month(exc_date),
+         exc_year = year(exc_date),
+         inc_month = month(inclusion_met_date),
+         inc_year = year(inclusion_met_date),
+         enroll_month = month(enroll_time),
+         enroll_year = year(enroll_time),
+         randomized_month = month(randomization_time),
+         randomized_year = year(randomization_time)) %>%
+  select(id, study_site, protocol,
+         screened, excluded_imm, excluded_later, excluded_ever,
+         exc_month, exc_year, matches("^exc\\_[0-9]+"), exc_other,
+         inc_month, inc_year, approached, refused,
+         orgfail_mv, orgfail_nippv, orgfail_shock,
+         enrolled, enroll_month, enroll_year,
+         randomized, randomized_month, randomized_year, disqualified,
+         ever_studydrug, drug_doses, matches("^held\\_[a-z]+$"),
+         died_inhosp, wd_inhosp, elig_fu, dc_status)
+
 saveRDS(ptstatus_df, file = "analysisdata/rds/ptstatus.rds")
 write_csv(ptstatus_df, path = "analysisdata/csv/ptstatus.csv")
