@@ -441,8 +441,8 @@ ptstatus_df <- ptstatus_df %>%
     ## Randomization vs disqualification
     ## Disqualified: screened, approached, did not refuse, enrolled,
     ##   not randomized + DQ time entered
-    disqualified = screened & approached & !refused & enrolled &
-      !randomized_yn & !is.na(disqualification_time),
+    disqualified = screened & approached & !refused & !excluded_ever &
+      enrolled & !randomized_yn & !is.na(disqualification_time),
     ## Randomized: screened, approached, did not refuse, enrolled,
     ##   randomized + time recorded
     randomized = screened & approached & !refused & enrolled &
@@ -684,9 +684,10 @@ ptstatus_df <- ptstatus_df %>%
          enrolled, enroll_month, enroll_year,
          randomized, randomized_month, randomized_year,
          rand_mv, rand_nippv, rand_shock,
-         disqualified,
+         disqualified, randomized_no_reason,
          ever_studydrug, drug_doses, matches("^held\\_[a-z]+$"),
-         died_inhosp, wd_inhosp, elig_fu, dc_status)
+         died_inhosp, wd_inhosp, elig_fu, dc_status) %>%
+  rename(dq_reason = "randomized_no_reason")
 
 saveRDS(ptstatus_df, file = "analysisdata/rds/ptstatus.rds")
 write_csv(ptstatus_df, path = "analysisdata/csv/ptstatus.csv")
