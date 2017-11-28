@@ -194,10 +194,10 @@ inhosp_df <- inhosp_raw %>%
     iqcode_score = rowMeans(.[, paste("iqcode", 1:16, "ph", sep = "_")])
   ) %>%
   rename(
-    ## Inclusions
-    orgfail_mv = "organ_failures_present_1",
-    orgfail_nippv = "organ_failures_present_2",
-    orgfail_shock = "organ_failures_present_3",
+    ## Inclusions at **enrollment**
+    enroll_mv = "organ_failures_present_1",
+    enroll_nippv = "organ_failures_present_2",
+    enroll_shock = "organ_failures_present_3",
     ## Exclusions (should match exc_df)
     exc_1_resolving = "rapidly_resolving",
     exc_2a_pregnancy = "pregnancy",
@@ -227,7 +227,7 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
   ## Filter out test patients
   filter(!str_detect(id, "TEST")) %>%
   select(id, study_site, protocol, exc_date:exc_notes,
-         inclusion_met_date:orgfail_shock, iqcode_score,
+         inclusion_met_date:enroll_shock, iqcode_score,
          everything()) %>%
   
   ## Format dates/times
@@ -492,9 +492,9 @@ ptstatus_df <- ptstatus_df %>%
   ## Change exclusion indicators to logicals, not 0/1
   mutate_at(
     vars(
-      adult_patient:orgfail_shock, ## qualification criteria
-      matches("^rand\\_"),         ## organ failure(s) at randomization
-      matches("^exc\\_[0-9]")      ## exclusions
+      adult_patient:enroll_shock, ## qualification criteria
+      matches("^rand\\_"),        ## organ failure(s) at randomization
+      matches("^exc\\_[0-9]")     ## exclusions
     ),
     as.logical
   )
@@ -680,9 +680,11 @@ ptstatus_df <- ptstatus_df %>%
          screened, excluded_imm, excluded_later, excluded_ever,
          exc_month, exc_year, matches("^exc\\_[0-9]+"), exc_other,
          inc_month, inc_year, approached, refused,
-         orgfail_mv, orgfail_nippv, orgfail_shock,
+         enroll_mv, enroll_nippv, enroll_shock,
          enrolled, enroll_month, enroll_year,
-         randomized, randomized_month, randomized_year, disqualified,
+         randomized, randomized_month, randomized_year,
+         rand_mv, rand_nippv, rand_shock,
+         disqualified,
          ever_studydrug, drug_doses, matches("^held\\_[a-z]+$"),
          died_inhosp, wd_inhosp, elig_fu, dc_status)
 
