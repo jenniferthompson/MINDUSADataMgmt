@@ -314,15 +314,15 @@ drug_rsnheld_df <- drug_raw %>%
     ## Shortened version of reason for hold, for transforming to wide format    
     drug_rsn_short = case_when(
       drug_rsn == "Delirium resolving/resolved" ~ "resolving",
-      drug_rsn == "QTc Prolongation" ~ "qtc",
-      drug_rsn == "Oversedation" ~ "oversed",
-      drug_rsn == "Extrapyramidal symptoms" ~ "eps",
-      drug_rsn == "Dystonia" ~ "dystonia",
-      drug_rsn == "Adverse event" ~ "ae",
-      drug_rsn == "ICU Discharge" ~ "icudc",
-      drug_rsn == "Patient off floor" ~ "offfloor",
-      drug_rsn == "Managing team refused" ~ "teamref",
-      drug_rsn == "Patient/family refused" ~ "ptfamref",
+      drug_rsn == "QTc Prolongation"            ~ "qtc",
+      drug_rsn == "Oversedation"                ~ "oversed",
+      drug_rsn == "Extrapyramidal symptoms"     ~ "eps",
+      drug_rsn == "Dystonia"                    ~ "dystonia",
+      drug_rsn == "Adverse event"               ~ "ae",
+      drug_rsn == "ICU Discharge"               ~ "icudc",
+      drug_rsn == "Patient off floor"           ~ "offfloor",
+      drug_rsn == "Managing team refused"       ~ "teamref",
+      drug_rsn == "Patient/family refused"      ~ "ptfamref",
       TRUE ~ "other"
     )
   ) %>%
