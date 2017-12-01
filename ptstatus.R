@@ -343,23 +343,23 @@ names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
 ##           eligibility period exceeded before screening)
 ## Excluded, ever: Screened, and met >=1 exclusion criteria (including IQCODE
 ##                 >= 4.5) without being randomized (subset of screened) **** not currently true - YAL-060
-## Excluded immediately: Screened, and met >=1 exclusion before being enrolled
+## Excluded immediately: Screened, and met >=1 exclusion before being consented
 ##                       (no enrollment time)
-## Excluded later: Screened, enrolled, and was found to meet >=1 exclusion
-##                 after enrollment (eg, high IQCODE, or discovery of
+## Excluded later: Screened, consented, and was found to meet >=1 exclusion
+##                 after consent (eg, high IQCODE, or discovery of
 ##                 maintenance antipsychotic use) without being randomized
 ##   excluded immediately + excluded later = excluded ever
 ## Approached: Screened, not immediately excluded
 ##             (excluded imm. + approached = screened; **** not currently true - MON-071)
 ## Refused: Screened, approached, & pt/surrogate approached but refused consent
 ##          (subset of approached)
-## Enrolled: Screened/approached, no refusal, enrollment date recorded
-##           (refused + enrolled = approached) **** not currently true d/t 44 patients with no exclusion; currently approached, but neither enrolled nor randomized
+## Consented: Screened/approached, no refusal, enrollment date recorded
+##            (refused + consent = approached) **** not currently true d/t 44 patients with no exclusion; currently approached, but neither consented nor randomized
 ##
 ## Randomization + study drug:
-## Disqualified: Enrolled, but not randomized + disqualification date
-## Randomized: Enrolled, randomized + randomization date
-##             (disqualified + randomized = enrolled)
+## Disqualified: Consented, but not randomized + disqualification date
+## Randomized: Consented, randomized + randomization date
+##             (disqualified + randomized = consented)
 ## Ever excluded + refused + randomized + disqualified = screened
 ## **** not currently true; recheck this after those no-exclusion patients are handled ****
 ## Received study drug: Randomized and received at least one dose of study drug
@@ -399,7 +399,7 @@ ptstatus_df <- ptstatus_df %>%
   mutate(
     ## Screened: met inclusion criteria & screened within 72h, *or* had
     ##   randomization time
-    ## (1 patient was enrolled 7h past 72h window and was eventually randomized)
+    ## (1 patient was consented 7h past 72h window and was eventually randomized)
     screened = ifelse(
       is.na(exc_1_resolving) & is.na(exc_9d_72h_noscreen), NA,
       (!((!is.na(exc_1_resolving) & exc_1_resolving) |
@@ -415,14 +415,14 @@ ptstatus_df <- ptstatus_df %>%
         is.na(randomization_time)
     ),
     ## Excluded immediately:
-    ##   Screened + met any exclusion but refusal + was not enrolled
+    ##   Screened + met any exclusion but refusal + was not consented
     excluded_imm = ifelse(
       rowSums(!is.na(.[, exclusion_rsns])) == 0, NA,
       screened &
         rowSums(.[, exclusion_rsns], na.rm = TRUE) > 0 &
         is.na(enroll_time)
     ),
-    ## Excluded later: Enrolled, but met >=1 exclusion criteria (including
+    ## Excluded later: Consented, but met >=1 exclusion criteria (including
     ## IQCODE) without being randomized
     excluded_later = ifelse(
       rowSums(!is.na(.[, exclusion_rsns])) == 0, NA,
@@ -435,17 +435,17 @@ ptstatus_df <- ptstatus_df %>%
     ),
     ## Refused: Screened, not immediately excluded, approached, refusal
     refused = screened & !excluded_imm & approached & exc_9b_refusal_ptsurr,
-    ## Enrolled: Screened, approached, did not refuse, enrollment time rec.
-    enrolled = screened & approached & !refused & !is.na(enroll_time),
+    ## Consented: Screened, approached, did not refuse, enrollment time rec.
+    consented = screened & approached & !refused & !is.na(enroll_time),
     
     ## Randomization vs disqualification
-    ## Disqualified: screened, approached, did not refuse, enrolled,
+    ## Disqualified: screened, approached, did not refuse, consented,
     ##   not randomized + DQ time entered
     disqualified = screened & approached & !refused & !excluded_ever &
-      enrolled & !randomized_yn & !is.na(disqualification_time),
-    ## Randomized: screened, approached, did not refuse, enrolled,
+      consented & !randomized_yn & !is.na(disqualification_time),
+    ## Randomized: screened, approached, did not refuse, consented,
     ##   randomized + time recorded
-    randomized = screened & approached & !refused & enrolled &
+    randomized = screened & approached & !refused & consented &
       randomized_yn & !is.na(randomization_time),
     
     ## End of in-hospital phase
@@ -522,7 +522,7 @@ test_df <- ptstatus_df %>%
   mutate(
     ## Calculate total number of exclusions
     exc_number = rowSums(.[, exclusion_rsns]),
-    exc_none = screened & !excluded_ever & !refused & !enrolled
+    exc_none = screened & !excluded_ever & !refused & !consented
   )
 
 # ## No one should have 0 exclusions checked. Write a subset of these IDs to CSV
@@ -544,7 +544,7 @@ main_exclusions <- c(
     sep = "_"
   ),
   "screened", "excluded_ever", "excluded_imm", "approached", "refused",
-  "enrolled", "excluded_later", "disqualified", "randomized", "ever_studydrug",
+  "consented", "excluded_later", "disqualified", "randomized", "ever_studydrug",
   "died_inhosp", "wd_inhosp", "elig_fu"
 )
 
@@ -560,7 +560,7 @@ summarize_exc <- test_df %>%
                  ifelse(exclusion == "excluded_imm", 3,
                  ifelse(exclusion == "approached", 5,
                  ifelse(exclusion == "refused", 6,
-                 ifelse(exclusion == "enrolled", 7,
+                 ifelse(exclusion == "consented", 7,
                  ifelse(exclusion == "excluded_later", 8,
                  ifelse(exclusion == "disqualified", 9,
                  ifelse(exclusion == "randomized", 10,
@@ -597,7 +597,7 @@ cat(
     "\n\n\nExclusion Details\n",
     "Total patients excluded: {sum_na(ptstatus_df$excluded_ever)}",
     "  Excluded at screening: {sum_na(ptstatus_df$excluded_imm)}",
-    "  Excluded after enrollment: {sum_na(ptstatus_df$excluded_later)}",
+    "  Excluded after consent: {sum_na(ptstatus_df$excluded_later)}",
     "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(excluded_later))}",
     .sep = "\n"
   )
@@ -605,11 +605,11 @@ cat(
 
 cat(
   glue(
-    "\n\n\nApproaches, Refusals & Enrollment\n",
+    "\n\n\nApproaches, Refusals & Consent\n",
     "Total patients approached: {sum_na(ptstatus_df$approached)}",
     "  Patient/surrogate refusal: {sum_na(ptstatus_df$refused)}",
-    "  Enrolled: {sum_na(ptstatus_df$enrolled)}",
-    "  Should equal line 1: {with(ptstatus_df, sum_na(enrolled) + sum_na(refused))}",
+    "  Consented: {sum_na(ptstatus_df$consented)}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(consented) + sum_na(refused))}",
     .sep = "\n"
   )
 )
@@ -617,7 +617,7 @@ cat(
 cat(
   glue(
     "\n\n\nRandomization & Disqualification\n",
-    "Total patients enrolled: {sum_na(ptstatus_df$enrolled)}",
+    "Total patients consented: {sum_na(ptstatus_df$consented)}",
     "  Disqualified: {sum_na(ptstatus_df$disqualified)}",
     "  Randomized: {sum_na(ptstatus_df$randomized)}",
     "  Should equal line 1: {with(ptstatus_df, sum_na(disqualified) + sum_na(randomized))}",
@@ -631,7 +631,7 @@ cat(
     "Total patients screened: {sum_na(ptstatus_df$screened)}",
     "  Excluded immediately: {sum_na(ptstatus_df$excluded_imm)}",
     "  Refused consent: {sum_na(ptstatus_df$refused)}",
-    "  Enrolled: {sum_na(ptstatus_df$enrolled)}",
+    "  Consented: {sum_na(ptstatus_df$consented)}",
     "    Randomized: {sum_na(ptstatus_df$randomized)}",
     "    Disqualified: {sum_na(ptstatus_df$disqualified)}",
     "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(refused) + sum_na(disqualified) + sum_na(randomized))}",
@@ -681,7 +681,7 @@ ptstatus_df <- ptstatus_df %>%
          exc_month, exc_year, matches("^exc\\_[0-9]+"), exc_other,
          inc_month, inc_year, approached, refused,
          enroll_mv, enroll_nippv, enroll_shock,
-         enrolled, enroll_month, enroll_year,
+         consented, enroll_month, enroll_year,
          randomized, randomized_month, randomized_year,
          rand_mv, rand_nippv, rand_shock,
          disqualified, randomized_no_reason,
