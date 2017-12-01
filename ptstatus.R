@@ -62,19 +62,65 @@ inhosp_raw <- import_df(
   fields = c(iqcode_vars, datestrack_vars),
   events = "enrollment__day_0_arm_1"
 ) %>%
-  select(-redcap_event_name, -enrollment_qualification_form_complete)
-
+  select(-redcap_event_name, -enrollment_qualification_form_complete) %>%
+  rename(
+    ## Inclusions at **enrollment**
+    enroll_mv = "organ_failures_present_1",
+    enroll_nippv = "organ_failures_present_2",
+    enroll_shock = "organ_failures_present_3",
+    ## Exclusions (should match exc_df)
+    exc_1_resolving = "rapidly_resolving",
+    exc_2a_pregnancy = "pregnancy",
+    exc_2b_breastfeed = "breastfeed",
+    exc_3_dementia = "dementia_neurodz",
+    exc_4_deficit = "neuro_event",
+    exc_5_torsadesqtc = "torsades",
+    exc_6_maintmeds = "maint_antipsy",
+    exc_7_nmsallergy = "nms_allergy",
+    exc_8_death24 = "moribund",
+    exc_9a_refusal_md = "attending_refuse",
+    exc_9b_refusal_ptsurr = "ptsurr_refuse",
+    exc_9c_unable_nosurr = "nosurr_avail",
+    exc_9d_72h_noscreen = "exc_scrn_period",
+    exc_9e_72h_nosurr = "nosurr_noncoma",
+    exc_9f_120h_coma = "nosurr_coma",
+    exc_10_blind_lang = "blind_deaf",
+    exc_11_prison = "incarcerated",
+    exc_12_coenroll = "coenrollment",
+    exc_99_other = "enr_qual_other",
+    exc_other = "enr_qual_other_rsn"
+  )
+  
 randqual_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
   id_field = "id",
   export_labels = "none",
-  fields = c("id", "organ_failure_present", "randomized_no_reason"),
+  fields = c(
+    "id", "organ_failure_present", "randomized_no_reason", "pregnancy_random",
+    "breastfeed_random", "neuro_event_random", "qtc_rand",
+    "maint_antipsy_random", "nms_allergy_random", "moribund_random",
+    "blind_deaf_random", "incarcerated_random", "coenrollment_random",
+    "rand_qual_other", "rand_qual_other_rsn"
+  ),
   events = "randomization_arm_1"
 ) %>%
   rename(rand_mv = "organ_failure_present_1",
          rand_nippv = "organ_failure_present_2",
          rand_shock = "organ_failure_present_3",
-         rand_noorgfailure = "organ_failure_present_0")
+         rand_noorgfailure = "organ_failure_present_0",
+         exc_2a_pregnancy = "pregnancy_random",
+         exc_2b_breastfeed = "breastfeed_random",
+         exc_4_deficit = "neuro_event_random",
+         exc_5_torsadesqtc = "qtc_rand",
+         exc_6_maintmeds = "maint_antipsy_random",
+         exc_7_nmsallergy = "nms_allergy_random",
+         exc_8_death24 = "moribund_random",
+         exc_10_blind_lang = "blind_deaf_random",
+         exc_11_prison = "incarcerated_random",
+         exc_12_coenroll = "coenrollment_random",
+         exc_99_other = "rand_qual_other",
+         exc_other = "rand_qual_other_rsn"
+  )
 
 ## -- Download data needed to determine whether patient ever got study drug ----
 drug_raw <- import_df(
@@ -105,6 +151,11 @@ exc_raw_checks <- exc_raw %>%
   ## "no exclusion" patients are handled
   assert(in_set(0, 1), matches("^exc\\_rsn\\_[0-9]+$"))
 
+randqual_raw_checks <- randqual_raw %>%
+  assert(not_na, rand_mv:rand_noorgfailure) %>%
+  assert(in_set(0:2), "exc_2a_pregnancy") %>%
+  assert(in_set(0, 1), "exc_2b_breastfeed", matches("^exc\\_[1, 4-9]"))
+
 inhosp_raw_checks <- inhosp_raw %>%
   ## Remove test patients
   ## ***** YAL-060 has lots of issues caught in data clean - recheck this!
@@ -114,7 +165,7 @@ inhosp_raw_checks <- inhosp_raw %>%
   ## 48 patients missing IQCODE variables
   ## MON-071 missing ptsurr_refuse
   assert(in_set(1:10), protocol) %>%
-  assert(in_set(0:1), adult_patient:nosurr_avail) %>%
+  assert(in_set(0:1), adult_patient:exc_99_other) %>%
   assert(in_set(1:6), matches("^iqcode\\_[0-9]+\\_ph$"))
 
 drug_raw_checks <- drug_raw %>%
@@ -163,9 +214,48 @@ exc_df <- exc_raw %>%
     exc_99_other = "exc_rsn_99"
   )
 
+## Combine exclusions from enrollment qualification + randomization
+##  qualification forms
+## Plan: create two rows per patient (one from each form) with all exclusions
+##       available at both time points; create total by summing two rows, turn
+##       into yes/no (1/0)
+exclusion_vars <- c(
+  "exc_1_resolving", "exc_2a_pregnancy", "exc_2b_breastfeed", "exc_3_dementia",
+  "exc_4_deficit", "exc_5_torsadesqtc", "exc_6_maintmeds", "exc_7_nmsallergy",
+  "exc_8_death24", "exc_9a_refusal_md", "exc_9b_refusal_ptsurr",
+  "exc_9c_unable_nosurr", "exc_9d_72h_noscreen", "exc_9e_72h_nosurr",
+  "exc_9f_120h_coma", "exc_10_blind_lang", "exc_11_prison", "exc_12_coenroll",
+  "exc_99_other"
+)
+
+inhosp_exc <- bind_rows(
+  select(inhosp_raw, id, one_of(exclusion_vars)),
+  select(randqual_raw, id, one_of(exclusion_vars))
+) %>%
+  ## In randomization qualification form, pregnancy exclusion could have
+  ## value 2 for N/A; change this to actual NA
+  mutate_at("exc_2a_pregnancy", ~ ifelse(. == 2, NA, .)) %>%
+  ## Summarize exclusions by patient: Get sum of times patient met each
+  ## exclusion then turn into 0/1 (a couple of patients have exclusions
+  ## documented in both forms, so total = 2; NA equivalent to 0)
+  group_by(id) %>%
+  summarize_at(vars(exclusion_vars), sum_na) %>%
+  mutate_at(vars(exclusion_vars), ~ as.numeric(. > 0)) %>%
+  ungroup
+
 inhosp_df <- inhosp_raw %>%
-  ## Add info from randomization
-  left_join(randqual_raw %>% select(-redcap_event_name), by = "id") %>%
+  ## Remove exclusions from enrollment qualification forms; replace these with
+  ## *combined* exclusions from EQ + RQ forms
+  select(-one_of(exclusion_vars)) %>%
+  left_join(inhosp_exc, by = "id") %>%
+  ## Add organ failure info and explanation for "other" exclusion from
+  ## randomization qualification form (no one excluded on enrollment
+  ## qualification form was excluded for "other"; no need to deal with that)
+  left_join(
+    randqual_raw %>%
+      select(id, starts_with("rand_"), randomized_no_reason, exc_other),
+    by = "id"
+  ) %>%
   mutate(
     ## Make study site, protocol, reason for disqualification factors
     ##   using levels from data dictionary
@@ -192,33 +282,6 @@ inhosp_df <- inhosp_raw %>%
     
     ## Calculate IQCODE score
     iqcode_score = rowMeans(.[, paste("iqcode", 1:16, "ph", sep = "_")])
-  ) %>%
-  rename(
-    ## Inclusions at **enrollment**
-    enroll_mv = "organ_failures_present_1",
-    enroll_nippv = "organ_failures_present_2",
-    enroll_shock = "organ_failures_present_3",
-    ## Exclusions (should match exc_df)
-    exc_1_resolving = "rapidly_resolving",
-    exc_2a_pregnancy = "pregnancy",
-    exc_2b_breastfeed = "breastfeed",
-    exc_3_dementia = "dementia_neurodz",
-    exc_4_deficit = "neuro_event",
-    exc_5_torsadesqtc = "torsades",
-    exc_6_maintmeds = "maint_antipsy",
-    exc_7_nmsallergy = "nms_allergy",
-    exc_8_death24 = "moribund",
-    exc_9a_refusal_md = "attending_refuse",
-    exc_9b_refusal_ptsurr = "ptsurr_refuse",
-    exc_9c_unable_nosurr = "nosurr_avail",
-    exc_9d_72h_noscreen = "exc_scrn_period",
-    exc_9e_72h_nosurr = "nosurr_noncoma",
-    exc_9f_120h_coma = "nosurr_coma",
-    exc_10_blind_lang = "blind_deaf",
-    exc_11_prison = "incarcerated",
-    exc_12_coenroll = "coenrollment",
-    exc_99_other = "enr_qual_other",
-    exc_other = "enr_qual_other_rsn"
   ) %>%
   select(-patient_id, -matches("^iqcode\\_[0-9]+\\_ph$"))
 
@@ -533,6 +596,12 @@ test_df <- ptstatus_df %>%
 #   path = "no_exclusions.csv"
 # )
 
+# ## List all exclusions due to "other" in randomization qualification form
+# write_csv(
+#   x = subset(randqual_raw, exc_99_other == 1, select = c(id, exc_other)),
+#   path = "randqual_otherexc.csv"
+# )
+
 ## Summarize % of exclusions
 main_exclusions <- c(
   paste(
@@ -585,9 +654,9 @@ cat(
   glue(
     "Screening and Exclusions\n",
     "Total patients screened: {sum_na(ptstatus_df$screened)}",
-    "  Patients excluded: {sum_na(ptstatus_df$excluded_ever)}",
+    "  Patients excluded immediately: {sum_na(ptstatus_df$excluded_imm)}",
     "  Patients approached: {sum_na(ptstatus_df$approached)}",
-    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_ever) + sum_na(approached))}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(approached))}",
     .sep = "\n"
   )
 )
@@ -618,9 +687,10 @@ cat(
   glue(
     "\n\n\nRandomization & Disqualification\n",
     "Total patients consented: {sum_na(ptstatus_df$consented)}",
+    "  Excluded after consent: {sum_na(ptstatus_df$excluded_later)}",
     "  Disqualified: {sum_na(ptstatus_df$disqualified)}",
     "  Randomized: {sum_na(ptstatus_df$randomized)}",
-    "  Should equal line 1: {with(ptstatus_df, sum_na(disqualified) + sum_na(randomized))}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_later) + sum_na(disqualified) + sum_na(randomized))}",
     .sep = "\n"
   )
 )
@@ -632,9 +702,10 @@ cat(
     "  Excluded immediately: {sum_na(ptstatus_df$excluded_imm)}",
     "  Refused consent: {sum_na(ptstatus_df$refused)}",
     "  Consented: {sum_na(ptstatus_df$consented)}",
+    "    Excluded after consent: {sum_na(ptstatus_df$excluded_later)}",
     "    Randomized: {sum_na(ptstatus_df$randomized)}",
     "    Disqualified: {sum_na(ptstatus_df$disqualified)}",
-    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(refused) + sum_na(disqualified) + sum_na(randomized))}",
+    "  Should equal line 1: {with(ptstatus_df, sum_na(excluded_imm) + sum_na(excluded_later) + sum_na(refused) + sum_na(disqualified) + sum_na(randomized))}",
     .sep = "\n"
   )
 )
