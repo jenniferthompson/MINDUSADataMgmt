@@ -18,7 +18,8 @@ sum_na <- partial(sum, na.rm = TRUE)
 ## All tokens are stored in .Renviron
 exc_dd <- get_datadict("MINDUSA_EXC_TOKEN")
 ih_dd <- get_datadict("MINDUSA_IH_TOKEN")
-ih_events <- get_events("MINDUSA_IH_TOKEN")
+ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
+  ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
 get_levels_ih <-
@@ -130,7 +131,9 @@ drug_raw <- import_df(
   fields = c(
     "id", "redcap_event_name",
     paste0("study_drug_given_", c(1:2, "3a")),
-    paste0("dose_held_reason_", 1:3)
+    paste0("dose_held_reason_", 1:3),
+    paste0("no_dose_why_", 1:3),
+    paste0("permanent_stop_why_", 1:3)
   )
 ) %>%
   ## Study drug could not be given on "randomziation" or "prior to d/c" events
@@ -160,10 +163,14 @@ inhosp_raw_checks <- inhosp_raw %>%
   ## Remove test patients
   ## ***** YAL-060 has lots of issues caught in data clean - recheck this!
   filter(!str_detect(toupper(id), "TEST") & !(id == "YAL-060")) %>%
-  # assert(not_na,
-  #        id:ptsurr_refuse, blind_deaf:enr_qual_other, enroll_time:randomized_yn) %>%
-  ## 48 patients missing IQCODE variables
-  ## MON-071 missing ptsurr_refuse
+  ## Exclusions 9cdef are protocol-specific and will be missing on some;
+  ##  don't include here
+  assert(
+    not_na,
+    id:exc_9b_refusal_ptsurr, exc_10_blind_lang:exc_99_other,
+    enroll_time:randomized_yn
+  ) %>%
+  # 48 patients missing IQCODE variables
   assert(in_set(1:10), protocol) %>%
   assert(in_set(0:1), adult_patient:exc_99_other) %>%
   assert(in_set(1:6), matches("^iqcode\\_[0-9]+\\_ph$"))
@@ -171,7 +178,10 @@ inhosp_raw_checks <- inhosp_raw %>%
 drug_raw_checks <- drug_raw %>%
   filter(!str_detect(toupper(id), "TEST")) %>%
   assert(in_set(0:1), matches("^study\\_drug\\_given\\_")) %>%
-  assert(in_set(c(1:10, 99)), matches("^dose\\_held\\_reason"))
+  assert(in_set(c(1:10, 99)), matches("^dose\\_held\\_reason")) %>%
+  assert(in_set(1:2), matches("^no\\_dose\\_why")) # %>%
+  ## PEN-009 used old option; asked coordinators to fix
+  # assert(in_set(c(1, 3, 5:13, 99)), matches("^permanent\\_stop\\_why"))
 
 ## -- Data management for exclusions -------------------------------------------
 ## Exclusions in exclusion log have partners in in-hospital database. Rename
@@ -397,6 +407,45 @@ drug_rsnheld_df <- drug_raw %>%
 names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
   paste0("held_", names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)])
 
+## -- Reasons for **permanent** discontinuation of study drug ------------------
+## Take only first instance where drug listed as permanently discontinued; get
+## reason listed at that dose
+drug_permdc_df <- drug_raw %>%
+  ## Add event_num for sorting help later
+  left_join(ih_events, by = c("redcap_event_name" = "unique_event_name")) %>%
+  
+  ## Dose 3 doesn't follow naming convention
+  rename(study_drug_given_3 = "study_drug_given_3a") %>%
+  
+  select(
+    id, redcap_event_name, event_num, matches("^study\\_drug\\_given"),
+    matches("^no\\_dose\\_why"), matches("^permanent\\_stop\\_why")
+  ) %>%
+
+  ## Reshape into one row per day + dose
+  gather(key = drug_var, value = drug_value,
+         study_drug_given_1:permanent_stop_why_3) %>%
+  separate(drug_var, into = c("drug_var", "dose_num"), sep = "\\_(?=[0-9]$)") %>%
+  spread(key = drug_var, value = drug_value) %>%
+
+  ## Keep only doses that were not given due to permanent hold
+  filter(study_drug_given == 0 & no_dose_why == 1) %>%
+  arrange(id, event_num, dose_num) %>%
+  
+  ## Take only first record per patient, factor-ize reason for discontinuation
+  group_by(id) %>%
+  slice(1) %>%
+  mutate(
+    permanent_stop_why = factor(
+      permanent_stop_why,
+      levels = get_levels_ih("permanent_stop_why_1"),
+      labels = names(get_levels_ih("permanent_stop_why_1"))
+    )
+  ) %>%
+  mutate(ever_permdc = TRUE) %>%
+  rename(first_permdc_rsn = "permanent_stop_why") %>%
+  select(id, ever_permdc, first_permdc_rsn)
+
 ## -- Create indicators for status at specific time points ---------------------
 ## Definitions:
 ##
@@ -546,11 +595,14 @@ ptstatus_df <- ptstatus_df %>%
   ##   for specific reasons, + # doses of study drug
   left_join(select(drug_given_df, id, ever_studydrug, drug_doses), by = "id") %>%
   left_join(drug_rsnheld_df, by = "id") %>%
+  ## **Permanent** discontinuation indicator + reason
+  left_join(drug_permdc_df, by = "id") %>%
   
   ## All in-hospital indicators should be present for all patients; set
   ##   in-hospital indicators for excluded patients to FALSE
   mutate_at(
-    vars(ever_studydrug:held_teamref), funs(ifelse(is.na(.), FALSE, .))
+    vars(ever_studydrug:held_teamref, ever_permdc),
+    funs(ifelse(is.na(.), FALSE, .))
   ) %>%
   ## Change exclusion indicators to logicals, not 0/1
   mutate_at(
@@ -757,6 +809,7 @@ ptstatus_df <- ptstatus_df %>%
          rand_mv, rand_nippv, rand_shock,
          disqualified, randomized_no_reason,
          ever_studydrug, drug_doses, matches("^held\\_[a-z]+$"),
+         ever_permdc, first_permdc_rsn,
          died_inhosp, wd_inhosp, elig_fu, dc_status) %>%
   rename(dq_reason = "randomized_no_reason")
 
