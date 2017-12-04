@@ -339,9 +339,16 @@ drug_given_df <- drug_raw %>%
   ## Only want indicators for whether drug was given
   gather(key = drug_var, value = drug_value, matches("^study\\_drug\\_given")) %>%
   
-  ## Calculate number of drug doses given per patient
+  ## Calculate number of drug doses given per patient-day
+  group_by(id, redcap_event_name) %>%
+  summarise(drug_doses_day = sum_na(drug_value)) %>%
+  ungroup %>%
+  
+  ## Calculate number of days, number of doses per patient
   group_by(id) %>%
-  summarise(drug_doses = sum(drug_value, na.rm = TRUE)) %>%
+  summarise(drug_days = sum_na(drug_doses_day > 0),
+            drug_doses = sum_na(drug_doses_day)) %>%
+  ungroup %>%
   
   ## Logical indicator for whether patient got >=1 dose
   mutate(ever_studydrug = !(drug_doses == 0))
@@ -593,7 +600,10 @@ ptstatus_df <- ptstatus_df %>%
   ) %>%
   ## Add indicators for whether patient ever got study drug + ever had it held
   ##   for specific reasons, + # doses of study drug
-  left_join(select(drug_given_df, id, ever_studydrug, drug_doses), by = "id") %>%
+  left_join(
+    select(drug_given_df, id, ever_studydrug, drug_days, drug_doses),
+    by = "id"
+  ) %>%
   left_join(drug_rsnheld_df, by = "id") %>%
   ## **Permanent** discontinuation indicator + reason
   left_join(drug_permdc_df, by = "id") %>%
@@ -808,7 +818,7 @@ ptstatus_df <- ptstatus_df %>%
          randomized, randomized_month, randomized_year,
          rand_mv, rand_nippv, rand_shock,
          disqualified, randomized_no_reason,
-         ever_studydrug, drug_doses, matches("^held\\_[a-z]+$"),
+         ever_studydrug, drug_days, drug_doses, matches("^held\\_[a-z]+$"),
          ever_permdc, first_permdc_rsn,
          died_inhosp, wd_inhosp, elig_fu, dc_status) %>%
   rename(dq_reason = "randomized_no_reason")
