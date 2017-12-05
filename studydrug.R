@@ -221,6 +221,7 @@ ptdoses_df <- doses_df %>%
   ## Summarize drug doses per patient
   group_by(id) %>%
   summarise(
+    ever_studydrug = sum_na(drug_given) > 0,
     num_drug_doses = sum_na(drug_given),
     
     ## Describe drug dose amounts
@@ -272,7 +273,7 @@ ptdrug_df <- ptdays_df %>%
   mutate_at(
     vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
-  select(id, num_drug_days:times_drug_held, ever_held_qtc, times_held_qtc,
+  select(id, ever_studydrug:times_drug_held, ever_held_qtc, times_held_qtc,
          ever_held_oversed, times_held_oversed, ever_held_eps, times_held_eps,
          ever_held_dystonia, times_held_dystonia, ever_held_ae, times_held_ae,
          ever_held_refuseteam, times_held_refuseteam, ever_held_refuseptfam,
