@@ -273,12 +273,13 @@ ptdrug_df <- ptdays_df %>%
   mutate_at(
     vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
-  select(id, ever_studydrug:times_drug_held, ever_held_qtc, times_held_qtc,
-         ever_held_oversed, times_held_oversed, ever_held_eps, times_held_eps,
-         ever_held_dystonia, times_held_dystonia, ever_held_ae, times_held_ae,
-         ever_held_refuseteam, times_held_refuseteam, ever_held_refuseptfam,
-         times_held_refuseptfam, ever_held_other, times_held_other,
-         ever_drug_permdc, dose_permdc_reason, everything())
+  select(id, ever_studydrug, num_drug_days, num_drug_doses:times_drug_held,
+         ever_held_qtc, times_held_qtc, ever_held_oversed, times_held_oversed,
+         ever_held_eps, times_held_eps, ever_held_dystonia, times_held_dystonia,
+         ever_held_ae, times_held_ae, ever_held_refuseteam,
+         times_held_refuseteam, ever_held_refuseptfam, times_held_refuseptfam,
+         ever_held_other, times_held_other, ever_drug_permdc,
+         dose_permdc_reason, everything())
 
 ## -- Data checks: Review this text file each time -----------------------------
 ## Write notes for "other" reasons for hold and permanent d/c to CSV for
