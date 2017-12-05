@@ -156,7 +156,8 @@ get_factor_levels <- function(ddict, varname){
     pull(select_choices_or_calculations)
   
   flevels <- str_extract_all(tmp, "[0-9]+(?=,)")[[1]] %>% as.numeric
-  names(flevels) <- str_extract_all(tmp, "(?<=, )[a-z, A-Z, 0-9, ., /, ']+")[[1]] %>%
+  names(flevels) <-
+    str_extract_all(tmp, "(?<=, )[a-z, A-Z, 0-9, ., /, ', \\-, +]+")[[1]] %>%
     trimws
   
   return(flevels)
@@ -179,3 +180,13 @@ print_datachecks <- function(msg, df){
   }
   cat("\n\n\n")
 }
+
+## -- Helper functions ---------------------------------------------------------
+max_na <- function(x){ max(x, na.rm = TRUE) }
+min_na <- function(x){ min(x, na.rm = TRUE) }
+sum_na <- function(x){ sum(x, na.rm = TRUE) }
+mean_na <- function(x){ mean(x, na.rm = TRUE) }
+sd_na <- function(x){ sd(x, na.rm = TRUE) }
+q25 <- function(x){ quantile(x, probs = 0.25, na.rm = TRUE) }
+q50 <- function(x){ quantile(x, probs = 0.50, na.rm = TRUE) }
+q75 <- function(x){ quantile(x, probs = 0.75, na.rm = TRUE) }
