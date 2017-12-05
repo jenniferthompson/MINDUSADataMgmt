@@ -40,6 +40,7 @@ drug_raw <- import_df(
     paste0("post_dose_qtc_", 1:3),
     paste0("no_dose_why_", 1:3),
     paste0("dose_held_reason_", 1:3),
+    paste0("oversedation_", 1:3, "_actual"),
     paste0("decrease_other_", 1:3),
     paste0("permanent_stop_why_", 1:3),
     paste0("permanent_stop_other_", 1:3)
@@ -63,7 +64,8 @@ drug_raw_checks <- drug_raw %>%
 doses_df <- drug_raw %>%
   ## Remove test patients
   filter(!str_detect(toupper(id), "TEST")) %>%
-  ## Rename 3rd study drug dose indicator for consistency, others for sense
+  ## Rename 3rd study drug dose indicator, oversedation for consistency, others
+  ## for sense
   rename(
     study_drug_given_3 = "study_drug_given_3a",
     dose_type_other_1 = "dose_y_other",
@@ -72,6 +74,9 @@ doses_df <- drug_raw %>%
     held_other_exp_1 = "decrease_other_1",
     held_other_exp_2 = "decrease_other_2",
     held_other_exp_3 = "decrease_other_3",
+    oversed_actual_1 = "oversedation_1_actual",
+    oversed_actual_2 = "oversedation_2_actual",
+    oversed_actual_3 = "oversedation_3_actual",
     permdc_other_exp_1 = "permanent_stop_other_1",
     permdc_other_exp_2 = "permanent_stop_other_2",
     permdc_other_exp_3 = "permanent_stop_other_3"
@@ -114,6 +119,11 @@ doses_df <- drug_raw %>%
       no_dose_why,
       levels = get_levels_ih("no_dose_why_1"),
       labels = names(get_levels_ih("no_dose_why_1"))
+    ),
+    oversed_actual = factor(
+      oversed_actual,
+      levels = get_levels_ih("oversedation_1_actual"),
+      labels = names(get_levels_ih("oversedation_1_actual"))
     ),
     dose_permdc_reason = factor(
       dose_permdc_reason,
@@ -187,11 +197,87 @@ doses_df <- drug_raw %>%
     post_dose_qtc,
     ## Hold info
     drug_held, dose_held_reason, matches("^held\\_[a-z]+$"), held_other_exp,
+    oversed_actual,
     ## Discontinuation info
     drug_permdc, dose_permdc_reason, matches("^permdc\\_[a-z]+$"),
     permdc_other_exp
   )
 
+
+## -- Create one data set with one record per **patient**, summarizing ---------
+## -- doses, holds, discontinuation --------------------------------------------
+## How many *days* did patients get study drug?
+ptdays_df <- doses_df %>%
+  group_by(id, redcap_event_name) %>%
+  summarise(drug_given_day = sum_na(drug_given) > 0) %>%
+  ungroup %>%
+  ## How many days did the patient get drug?
+  group_by(id) %>%
+  summarise(num_drug_days = sum_na(drug_given_day)) %>%
+  ungroup
+
+## Summarize *doses*
+ptdoses_df <- doses_df %>%
+  ## Summarize drug doses per patient
+  group_by(id) %>%
+  summarise(
+    num_drug_doses = sum_na(drug_given),
+    
+    ## Describe drug dose amounts
+    max_drug_dose = ifelse(num_drug_doses > 0, max_na(dose_amt), NA),
+    min_drug_dose = ifelse(num_drug_doses > 0, min_na(dose_amt), NA),
+    q25_drug_dose = ifelse(num_drug_doses > 0, q25(dose_amt), NA),
+    q50_drug_dose = ifelse(num_drug_doses > 0, q50(dose_amt), NA),
+    q75_drug_dose = ifelse(num_drug_doses > 0, q75(dose_amt), NA),
+    mean_drug_dose = ifelse(num_drug_doses > 0, mean_na(dose_amt), NA),
+    sd_drug_dose = ifelse(num_drug_doses > 0, sd_na(dose_amt), NA),
+    
+    ## Indicator for whether drug was ever temporarily held
+    ever_drug_held = sum_na(drug_held) > 0,
+    
+    ## How many times was drug temporarily held? How often for each reason?
+    times_drug_held = sum_na(drug_held),
+    times_held_qtc = sum_na(held_qtc),
+    times_held_oversed = sum_na(held_oversed),
+    times_held_eps = sum_na(held_eps),
+    times_held_dystonia = sum_na(held_dystonia),
+    times_held_ae = sum_na(held_ae),
+    times_held_refuseteam = sum_na(held_refuseteam),
+    times_held_refuseptfam = sum_na(held_refuseptfam),
+    times_held_other = sum_na(held_other),
+    
+    ## Indicator for whether drug ever permanently discontinued
+    ever_drug_permdc = sum_na(drug_permdc) > 0
+  ) %>%
+  ## Create indicators for whether patient ever had drug held for each reason
+  mutate_at(vars(matches("^times\\_held")), funs(ever = . > 0)) %>%
+  rename_at(vars(matches("^times\\_held\\_.*\\_ever$")),
+            funs(gsub("\\_ever$", "", gsub("times", "ever", .))))
+
+## Find reason for 1st discontinuation for each patient
+first_dc <- doses_df %>%
+  filter(drug_permdc) %>%
+  left_join(select(ih_events, unique_event_name, event_num),
+            by = c("redcap_event_name" = "unique_event_name")) %>%
+  arrange(id, event_num) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup %>%
+  select(id, dose_permdc_reason:permdc_other_exp)
+
+## Combine days, doses, and discontinuation information; one record per patient
+ptdrug_df <- ptdays_df %>%
+  left_join(ptdoses_df, by = "id") %>%
+  left_join(first_dc, by = "id") %>%
+  mutate_at(
+    vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
+  ) %>%
+  select(id, num_drug_days:times_drug_held, ever_held_qtc, times_held_qtc,
+         ever_held_oversed, times_held_oversed, ever_held_eps, times_held_eps,
+         ever_held_dystonia, times_held_dystonia, ever_held_ae, times_held_ae,
+         ever_held_refuseteam, times_held_refuseteam, ever_held_refuseptfam,
+         times_held_refuseptfam, ever_held_other, times_held_other,
+         ever_drug_permdc, dose_permdc_reason, everything())
 
 ## -- Data checks: Review this text file each time -----------------------------
 ## Write notes for "other" reasons for hold and permanent d/c to CSV for
@@ -234,3 +320,10 @@ print(with(doses_df_ck, table(drug_permdc, rsns_permdc, useNA = "ifany")))
 
 
 sink()
+
+## -- Save both files to rds, csv ----------------------------------------------
+saveRDS(doses_df, file = "analysisdata/rds/doses.rds")
+write_csv(doses_df, path = "analysisdata/csv/doses.csv")
+
+saveRDS(ptdrug_df, file = "analysisdata/rds/ptdrug.rds")
+write_csv(ptdrug_df, path = "analysisdata/csv/ptdrug.csv")
