@@ -123,23 +123,6 @@ randqual_raw <- import_df(
          exc_other = "rand_qual_other_rsn"
   )
 
-## -- Download data needed to determine whether patient ever got study drug ----
-drug_raw <- import_df(
-  rctoken = "MINDUSA_IH_TOKEN",
-  id_field = "id",
-  export_labels = "none",
-  fields = c(
-    "id", "redcap_event_name",
-    paste0("study_drug_given_", c(1:2, "3a")),
-    paste0("dose_held_reason_", 1:3),
-    paste0("no_dose_why_", 1:3),
-    paste0("permanent_stop_why_", 1:3)
-  )
-) %>%
-  ## Study drug could not be given on "randomziation" or "prior to d/c" events
-  filter(!(redcap_event_name %in%
-             c("randomization_arm_1", "prior_to_hospital_arm_1")))
-
 ## -- assertr checks for raw data ----------------------------------------------
 ## - All variables should always be present except for exc_other, exc_notes
 ## - All exclusion variables should be non-missing, numeric, 0/1
@@ -174,14 +157,6 @@ inhosp_raw_checks <- inhosp_raw %>%
   assert(in_set(1:10), protocol) %>%
   assert(in_set(0:1), adult_patient:exc_99_other) %>%
   assert(in_set(1:6), matches("^iqcode\\_[0-9]+\\_ph$"))
-
-drug_raw_checks <- drug_raw %>%
-  filter(!str_detect(toupper(id), "TEST")) %>%
-  assert(in_set(0:1), matches("^study\\_drug\\_given\\_")) %>%
-  assert(in_set(c(1:10, 99)), matches("^dose\\_held\\_reason")) %>%
-  assert(in_set(1:2), matches("^no\\_dose\\_why")) # %>%
-  ## PEN-009 used old option; asked coordinators to fix
-  # assert(in_set(c(1, 3, 5:13, 99)), matches("^permanent\\_stop\\_why"))
 
 ## -- Data management for exclusions -------------------------------------------
 ## Exclusions in exclusion log have partners in in-hospital database. Rename
@@ -331,128 +306,6 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
     )
   )
 
-## -- Indicator for whether patient ever got study drug ------------------------
-drug_given_df <- drug_raw %>%
-  ## Dose 3 doesn't follow naming convention
-  rename(study_drug_given_3 = "study_drug_given_3a") %>%
-  
-  ## Only want indicators for whether drug was given
-  gather(key = drug_var, value = drug_value, matches("^study\\_drug\\_given")) %>%
-  
-  ## Calculate number of drug doses given per patient-day
-  group_by(id, redcap_event_name) %>%
-  summarise(drug_doses_day = sum_na(drug_value)) %>%
-  ungroup %>%
-  
-  ## Calculate number of days, number of doses per patient
-  group_by(id) %>%
-  summarise(drug_days = sum_na(drug_doses_day > 0),
-            drug_doses = sum_na(drug_doses_day)) %>%
-  ungroup %>%
-  
-  ## Logical indicator for whether patient got >=1 dose
-  mutate(ever_studydrug = !(drug_doses == 0))
-
-## -- Indicator for whether pt ever had drug held for specific reasons ---------
-drug_rsnheld_df <- drug_raw %>%
-  ## Only want variables pertaining to reason study drug held
-  select(id, matches("^dose\\_held\\_reason")) %>%
-  
-  ## Reshape to long format (all 3 doses in one col), drop indicator for dose #
-  gather(key = drug_var, value = drug_rsn, matches("^dose\\_held\\_reason")) %>%
-  select(-drug_var) %>%
-  
-  ## Drop doses where no reason for hold marked
-  filter(!is.na(drug_rsn)) %>%
-  
-  ## Replace numeric codes with factor labels from database
-  mutate(
-    drug_rsn = factor(
-      drug_rsn,
-      levels = get_levels_ih("dose_held_reason_1"),
-      labels = names(get_levels_ih("dose_held_reason_1"))
-    )
-  ) %>%
-  
-  ## Get counts of number of times drug held for each reason
-  add_count(id, drug_rsn) %>%
-  distinct %>%
-  
-  ## We want one row per patient per potential reason for hold
-  right_join(
-    cross_df(
-      list("id" = sort(unique(drug_raw$id)),
-           "drug_rsn" = names(get_levels_ih("dose_held_reason_1")))
-    ),
-    by = c("id", "drug_rsn")
-  ) %>%
-  
-  mutate(
-    ## Indicator for whether drug ever held for a given reason
-    held = !is.na(n),
-
-    ## Shortened version of reason for hold, for transforming to wide format    
-    drug_rsn_short = case_when(
-      drug_rsn == "Delirium resolving/resolved" ~ "resolving",
-      drug_rsn == "QTc Prolongation"            ~ "qtc",
-      drug_rsn == "Oversedation"                ~ "oversed",
-      drug_rsn == "Extrapyramidal symptoms"     ~ "eps",
-      drug_rsn == "Dystonia"                    ~ "dystonia",
-      drug_rsn == "Adverse event"               ~ "ae",
-      drug_rsn == "ICU Discharge"               ~ "icudc",
-      drug_rsn == "Patient off floor"           ~ "offfloor",
-      drug_rsn == "Managing team refused"       ~ "teamref",
-      drug_rsn == "Patient/family refused"      ~ "ptfamref",
-      TRUE ~ "other"
-    )
-  ) %>%
-  
-  ## Reshape to wide format
-  select(id, held, drug_rsn_short) %>%
-  spread(key = drug_rsn_short, value = held)
-
-names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)] <-
-  paste0("held_", names(drug_rsnheld_df)[2:ncol(drug_rsnheld_df)])
-
-## -- Reasons for **permanent** discontinuation of study drug ------------------
-## Take only first instance where drug listed as permanently discontinued; get
-## reason listed at that dose
-drug_permdc_df <- drug_raw %>%
-  ## Add event_num for sorting help later
-  left_join(ih_events, by = c("redcap_event_name" = "unique_event_name")) %>%
-  
-  ## Dose 3 doesn't follow naming convention
-  rename(study_drug_given_3 = "study_drug_given_3a") %>%
-  
-  select(
-    id, redcap_event_name, event_num, matches("^study\\_drug\\_given"),
-    matches("^no\\_dose\\_why"), matches("^permanent\\_stop\\_why")
-  ) %>%
-
-  ## Reshape into one row per day + dose
-  gather(key = drug_var, value = drug_value,
-         study_drug_given_1:permanent_stop_why_3) %>%
-  separate(drug_var, into = c("drug_var", "dose_num"), sep = "\\_(?=[0-9]$)") %>%
-  spread(key = drug_var, value = drug_value) %>%
-
-  ## Keep only doses that were not given due to permanent hold
-  filter(study_drug_given == 0 & no_dose_why == 1) %>%
-  arrange(id, event_num, dose_num) %>%
-  
-  ## Take only first record per patient, factor-ize reason for discontinuation
-  group_by(id) %>%
-  slice(1) %>%
-  mutate(
-    permanent_stop_why = factor(
-      permanent_stop_why,
-      levels = get_levels_ih("permanent_stop_why_1"),
-      labels = names(get_levels_ih("permanent_stop_why_1"))
-    )
-  ) %>%
-  mutate(ever_permdc = TRUE) %>%
-  rename(first_permdc_rsn = "permanent_stop_why") %>%
-  select(id, ever_permdc, first_permdc_rsn)
-
 ## -- Create indicators for status at specific time points ---------------------
 ## Definitions:
 ##
@@ -598,22 +451,7 @@ ptstatus_df <- ptstatus_df %>%
     )
     
   ) %>%
-  ## Add indicators for whether patient ever got study drug + ever had it held
-  ##   for specific reasons, + # doses of study drug
-  left_join(
-    select(drug_given_df, id, ever_studydrug, drug_days, drug_doses),
-    by = "id"
-  ) %>%
-  left_join(drug_rsnheld_df, by = "id") %>%
-  ## **Permanent** discontinuation indicator + reason
-  left_join(drug_permdc_df, by = "id") %>%
   
-  ## All in-hospital indicators should be present for all patients; set
-  ##   in-hospital indicators for excluded patients to FALSE
-  mutate_at(
-    vars(ever_studydrug:held_teamref, ever_permdc),
-    funs(ifelse(is.na(.), FALSE, .))
-  ) %>%
   ## Change exclusion indicators to logicals, not 0/1
   mutate_at(
     vars(
@@ -675,7 +513,7 @@ main_exclusions <- c(
     sep = "_"
   ),
   "screened", "excluded_ever", "excluded_imm", "approached", "refused",
-  "consented", "excluded_later", "disqualified", "randomized", "ever_studydrug",
+  "consented", "excluded_later", "disqualified", "randomized",
   "died_inhosp", "wd_inhosp", "elig_fu"
 )
 
@@ -772,17 +610,6 @@ cat(
   )
 )
 
-print_datachecks(
-  "\n\n\nPatients not randomized but who received study drug:",
-  subset(
-    ptstatus_df,
-    (is.na(randomized) | !randomized) & ever_studydrug,
-    select = c(
-      id, screened, approached, excluded_ever, randomized_yn, randomization_time
-    )
-  )
-)
-
 cat(
   glue(
     "End of In-Hospital Phase\n",
@@ -818,8 +645,6 @@ ptstatus_df <- ptstatus_df %>%
          randomized, randomized_month, randomized_year,
          rand_mv, rand_nippv, rand_shock,
          disqualified, randomized_no_reason,
-         ever_studydrug, drug_days, drug_doses, matches("^held\\_[a-z]+$"),
-         ever_permdc, first_permdc_rsn,
          died_inhosp, wd_inhosp, elig_fu, dc_status) %>%
   rename(dq_reason = "randomized_no_reason")
 
