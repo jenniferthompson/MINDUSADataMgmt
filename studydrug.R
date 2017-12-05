@@ -134,7 +134,9 @@ doses_df <- drug_raw %>%
   ## Only want doses which were entered in the database
   filter(!is.na(study_drug_given)) %>%
   mutate(
-    ## Numeric version of dose amount; all units are mL, don't need that
+    ## Numeric versions of QTc, dose amount; dose units are mL, don't need that
+    pre_dose_qtc = as.numeric(pre_dose_qtc),
+    post_dose_qtc = as.numeric(post_dose_qtc),
     dose_amt = as.numeric(gsub(" mL", "", dose_amt)),
     ## -- Create T/F indicators for each dose ----------------------------------
     ## Was drug given?
