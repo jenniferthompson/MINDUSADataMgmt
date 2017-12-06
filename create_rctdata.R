@@ -9,7 +9,7 @@ ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
 ptdrug_df <- readRDS("analysisdata/rds/ptdrug.rds")
 doses_df <- readRDS("analysisdata/rds/doses.rds")
 
-## -- Temporary: Add fake treatment groups to datasets -------------------------
+## -- Temporary: Create dataset of fake treatment groups -----------------------
 ## Final treatment groups will be added once data clean is finalized, database
 ## is "locked" & final treatment groups received from investigational pharmacist
 
@@ -25,15 +25,6 @@ trt_df <- data.frame(
   )
 )
 
-## Add treatment group to datasets
-add_trt <- function(df){
-  left_join(df, trt_df, by = "id")
-}
-
-ptstatus_df <- add_trt(ptstatus_df)
-ptdrug_df <- add_trt(ptdrug_df)
-doses_df <- add_trt(doses_df)
-
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
-save(ptstatus_df, ptdrug_df, doses_df,
+save(trt_df, ptstatus_df, ptdrug_df, doses_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")
