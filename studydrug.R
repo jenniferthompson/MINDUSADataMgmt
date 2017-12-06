@@ -211,11 +211,20 @@ doses_df <- drug_raw %>%
 ## How many *days* did patients get study drug?
 ptdays_df <- doses_df %>%
   group_by(id, redcap_event_name) %>%
-  summarise(drug_given_day = sum_na(drug_given) > 0) %>%
+  summarise(
+    drug_given_day = sum_na(drug_given) > 0,
+    total_drug_daily = sum_na(dose_amt)
+  ) %>%
+  mutate(
+    total_drug_daily = ifelse(total_drug_daily == 0, NA, total_drug_daily)
+  ) %>%
   ungroup %>%
-  ## How many days did the patient get drug?
+  ## How many days did the patient get drug? What was average total daily dose?
   group_by(id) %>%
-  summarise(num_drug_days = sum_na(drug_given_day)) %>%
+  summarise(
+    num_drug_days = sum_na(drug_given_day),
+    mean_drug_daily = ifelse(num_drug_days == 0, NA, mean_na(total_drug_daily))
+  ) %>%
   ungroup
 
 ## Summarize *doses*
@@ -275,13 +284,13 @@ ptdrug_df <- ptdays_df %>%
   mutate_at(
     vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
-  select(id, ever_studydrug, num_drug_days, num_drug_doses:times_drug_held,
-         ever_held_qtc, times_held_qtc, ever_held_oversed, times_held_oversed,
-         ever_held_eps, times_held_eps, ever_held_dystonia, times_held_dystonia,
-         ever_held_ae, times_held_ae, ever_held_refuseteam,
-         times_held_refuseteam, ever_held_refuseptfam, times_held_refuseptfam,
-         ever_held_other, times_held_other, ever_drug_permdc,
-         dose_permdc_reason, everything())
+  select(id, ever_studydrug, num_drug_days, mean_drug_daily,
+         num_drug_doses:times_drug_held, ever_held_qtc, times_held_qtc,
+         ever_held_oversed, times_held_oversed, ever_held_eps, times_held_eps,
+         ever_held_dystonia, times_held_dystonia, ever_held_ae, times_held_ae,
+         ever_held_refuseteam, times_held_refuseteam, ever_held_refuseptfam,
+         times_held_refuseptfam, ever_held_other, times_held_other,
+         ever_drug_permdc, dose_permdc_reason, everything())
 
 ## -- Data checks: Review this text file each time -----------------------------
 ## Write notes for "other" reasons for hold and permanent d/c to CSV for
