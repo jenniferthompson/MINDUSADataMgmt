@@ -11,9 +11,6 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
-## Create partial-ed version of sum()
-sum_na <- partial(sum, na.rm = TRUE)
-
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
 exc_dd <- get_datadict("MINDUSA_EXC_TOKEN")
@@ -37,7 +34,9 @@ exc_raw <- import_df(
   id_field = "exc_id",
   forms = "exclusion_log",
   export_labels = "none"
-)
+) %>%
+  ## Remove test patients
+  filter(!str_detect(toupper(id), "TEST"))
 
 ## -- Download variables needed to determine patient status at enrollment, -----
 ## -- disqualification, randomization, discharge -------------------------------
@@ -63,6 +62,8 @@ inhosp_raw <- import_df(
   fields = c(iqcode_vars, datestrack_vars),
   events = "enrollment__day_0_arm_1"
 ) %>%
+  ## Remove test patients
+  filter(!str_detect(toupper(id), "TEST")) %>%
   select(-redcap_event_name, -enrollment_qualification_form_complete) %>%
   rename(
     ## Inclusions at **enrollment**
@@ -105,6 +106,8 @@ randqual_raw <- import_df(
   ),
   events = "randomization_arm_1"
 ) %>%
+  ## Remove test patients
+  filter(!str_detect(toupper(id), "TEST")) %>%
   rename(rand_mv = "organ_failure_present_1",
          rand_nippv = "organ_failure_present_2",
          rand_shock = "organ_failure_present_3",
@@ -143,9 +146,8 @@ randqual_raw_checks <- randqual_raw %>%
   assert(in_set(0, 1), "exc_2b_breastfeed", matches("^exc\\_[1, 4-9]"))
 
 inhosp_raw_checks <- inhosp_raw %>%
-  ## Remove test patients
   ## ***** YAL-060 has lots of issues caught in data clean - recheck this!
-  filter(!str_detect(toupper(id), "TEST") & !(id == "YAL-060")) %>%
+  filter(!(id == "YAL-060")) %>%
   ## Exclusions 9cdef are protocol-specific and will be missing on some;
   ##  don't include here
   assert(
@@ -161,7 +163,7 @@ inhosp_raw_checks <- inhosp_raw %>%
 ## -- Data management for exclusions -------------------------------------------
 ## Exclusions in exclusion log have partners in in-hospital database. Rename
 ## variables so these a) are more meaningful and b) match up.
-## Also: remove test pts; force IDs to have "-" as separator and be in all caps
+## Also: Force IDs to have "-" as separator and be in all caps
 
 ## Exclusion log
 exc_df <- exc_raw %>%
@@ -272,8 +274,6 @@ inhosp_df <- inhosp_raw %>%
 
 ## -- Combine exclusion, in-hospital data for one master dataset ---------------
 ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
-  ## Filter out test patients
-  filter(!str_detect(id, "TEST")) %>%
   select(id, study_site, protocol, exc_date:exc_notes,
          inclusion_met_date:enroll_shock, iqcode_score,
          everything()) %>%

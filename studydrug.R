@@ -10,9 +10,6 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
-## Create partial-ed version of sum()
-sum_na <- partial(sum, na.rm = TRUE)
-
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
 ih_dd <- get_datadict("MINDUSA_IH_TOKEN")
@@ -46,13 +43,14 @@ drug_raw <- import_df(
     paste0("permanent_stop_other_", 1:3)
   )
 ) %>%
+  ## Remove test patients
+  filter(!str_detect(toupper(id), "TEST")) %>%
   ## Study drug could not be given on "randomziation" or "prior to d/c" events
   filter(!(redcap_event_name %in%
              c("randomization_arm_1", "prior_to_hospital_arm_1")))
 
 ## -- assertr checks for raw data ----------------------------------------------
 drug_raw_checks <- drug_raw %>%
-  filter(!str_detect(toupper(id), "TEST")) %>%
   assert(in_set(0:1), matches("^study\\_drug\\_given\\_")) %>%
   assert(within_bounds(0, 700), matches("^pre\\_dose\\_qtc")) %>%
   assert(in_set(c(1:10, 99)), matches("^dose\\_held\\_reason")) %>%
@@ -62,8 +60,6 @@ drug_raw_checks <- drug_raw %>%
 
 ## -- Create one data set with one record per **study drug dose** --------------
 doses_df <- drug_raw %>%
-  ## Remove test patients
-  filter(!str_detect(toupper(id), "TEST")) %>%
   ## Rename 3rd study drug dose indicator, oversedation for consistency, others
   ## for sense
   rename(
