@@ -157,7 +157,7 @@ get_factor_levels <- function(ddict, varname){
   
   flevels <- str_extract_all(tmp, "[0-9]+(?=,)")[[1]] %>% as.numeric
   names(flevels) <-
-    str_extract_all(tmp, "(?<=, )[a-z, A-Z, 0-9, ., /, ', \\-, +]+")[[1]] %>%
+    str_extract_all(tmp, "(?<=, )[a-z, A-Z, 0-9, ., /, ', \\-, +, (, )]+")[[1]] %>%
     trimws
   
   return(flevels)
