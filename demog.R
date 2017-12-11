@@ -517,12 +517,12 @@ baseline <- baseline %>%
     
     ## Renal: Look at highest creatinine *and* urine output
     renal_sofa = case_when(
-      is.na(cr_enr_high) | is.na(uo_enr_f)       ~ as.numeric(NA),
-      cr_enr_high >= 5   | uo_enr_f == "0-200"   ~ 4,
-      cr_enr_high >= 3.5 | uo_enr_f == "201-500" ~ 3,
-      cr_enr_high >= 2                           ~ 2,
-      cr_enr_high >= 1.2                         ~ 1,
-      TRUE                                       ~ 0
+      is.na(cr_enr_high) ~ as.numeric(NA),
+      cr_enr_high >= 5   | (!is.na(uo_enr_f) & uo_enr_f == "0-200")   ~ 4,
+      cr_enr_high >= 3.5 | (!is.na(uo_enr_f) & uo_enr_f == "201-500") ~ 3,
+      cr_enr_high >= 2                                                ~ 2,
+      cr_enr_high >= 1.2                                              ~ 1,
+      TRUE                                                            ~ 0
     )
   ) %>%
   ## Cardiovascular: already calculated; rename for consistency, create factor
