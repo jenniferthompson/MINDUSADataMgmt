@@ -338,25 +338,42 @@ names(soi_daily) <- c("id", "event_name", "study_date", "pf_worst", "sf_worst",
 ## Restrict to events within three days of ICU admission, find earliest
 ## non-missing value for each quantity
 soi_daily <- soi_daily %>%
-  ## Restrict to events within three days of ICU admission
+  ## Restrict to events within two days of ICU admission
+  ##  ("three days" = admission + two following days)
   left_join(select(baseline, id, icuadm_date_1)) %>%
   mutate(
+    ## Change GCS = 99 to N/A - don't want these values to "count"
+    gcs = ifelse(gcs == 99, NA, gcs),
     days_after_admission =
       as.numeric(difftime(study_date, icuadm_date_1, units = "days"))
   ) %>%
-  filter(days_after_admission <= 3) %>%
+  filter(days_after_admission <= 2) %>%
   ## Take earliest non-missing value for each value per patient
   arrange(id, days_after_admission) %>%
   group_by(id) %>%
   summarise_at(vars(-study_date, -event_name, -icuadm_date_1),
                funs(first_notna)) %>%
   ungroup() %>%
-  rename_at(vars(-id), funs(paste0(., "_postadm")))
+  rename_at(vars(-id), funs(paste0(., "_postadm"))) %>%
+  ## Factor version of urine output
+  mutate(
+    uo_postadm_f = factor(
+      uo_postadm,
+      levels = get_levels_ih("uo_enr"),
+      labels = names(get_levels_ih("uo_enr"))
+    )
+  )
 
-## -- APACHE II score --------------------------------------------------------
-## Reference: Knaus et al, CCM 1985 Oct; 13(10):818-29
-## https://www.ncbi.nlm.nih.gov/pubmed/3928249
+## -- SOFA score at ICU admission ----------------------------------------------
+## References:
+##   Original SOFA paper, Vincent et al (https://doi.org/10.1007/BF01709751)
+##   S/F as substitute for unavailable P/F:
+##     Pandharipande et al https://www.ncbi.nlm.nih.gov/pubmed/19242333
+##   RASS as substitute for unavailable GCS:
+##     Vasilevskis et al https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4748963/
+##     Method C has best predictive validity
 baseline <- baseline %>%
+  left_join(soi_daily, by = "id") %>%
   ## RASS at ICU admission (to use in place of missing GCS)
   mutate(
     rass_low_enr = ifelse(
@@ -364,201 +381,8 @@ baseline <- baseline %>%
     )
   ) %>%
   mutate(
-    ## Temperature
-    temp_ap = case_when(
-      is.na(temp_enr_high)  | is.na(temp_enr_low) ~ as.numeric(NA),
-      temp_enr_high >= 41   | temp_enr_low < 30   ~ 4,
-      temp_enr_high >= 39   | temp_enr_low < 32   ~ 3,
-                              temp_enr_low < 34   ~ 2,
-      temp_enr_high >= 38.5 | temp_enr_low < 36   ~ 1,
-      TRUE                                        ~ 0
-    ),
-    
-    ## Mean arterial pressure
-    map_ap = case_when(
-      is.na(map_enr_high) | is.na(map_enr_low) ~ as.numeric(NA),
-      map_enr_high >= 160 | map_enr_low <= 49  ~ 4,
-      map_enr_high >= 130                      ~ 3,
-      map_enr_high >= 110 | map_enr_low <= 70  ~ 2,
-      TRUE                                     ~ 0
-    ),
-    
-    ## Heart rate
-    hr_ap = case_when(
-      is.na(hr_enr_high) | is.na(hr_enr_low) ~ as.numeric(NA),
-      hr_enr_high >= 180 | hr_enr_low <= 39  ~ 4,
-      hr_enr_high >= 140 | hr_enr_low <= 54  ~ 3,
-      hr_enr_high >= 110 | hr_enr_low <= 69  ~ 2,
-      TRUE ~ 0
-    ),
-    
-    ## Respiratory rate
-    rr_ap = case_when(
-      is.na(rr_enr_high) | is.na(rr_enr_low) ~ as.numeric(NA),
-      rr_enr_high >= 50  | rr_enr_low <= 5   ~ 4,
-      rr_enr_high >= 35                      ~ 3,
-                           rr_enr_low <= 9   ~ 2,
-      rr_enr_high >= 25  | rr_enr_low <= 11  ~ 1,
-      TRUE                                   ~ 0
-    ),
-    
-    ## Oxygenation: the fun part!
-    ## If oxygenation info available (FiO2, PCO2, PaO2), calculate A-a gradient:
-    ## ((713 * FiO2) - (PCO2 / 0.8)) - PaO2; formula confirmed by EWE Dec 2017
-    aa_ap = ifelse(
-      is.na(fio2_enr) | is.na(pco2_enr) | is.na(pao2_enr), NA,
-      ((713 * fio2_enr) - (pco2_enr / 0.8)) - pao2_enr
-    ),
-    
-    ## If FiO2 >= 0.5, assign points using A-a gradient;
-    ##   if < 0.5, assign points using PaO2
-    oxy_ap = case_when(
-      is.na(fio2_enr)                  ~ as.numeric(NA),
-      fio2_enr >= 0.5 & aa_ap >= 500   ~ 4,
-      fio2_enr >= 0.5 & aa_ap >= 350   ~ 3,
-      fio2_enr >= 0.5 & aa_ap >= 200   ~ 2,
-      fio2_enr >= 0.5 & aa_ap < 200    ~ 0,
-      fio2_enr < 0.5  & pao2_enr < 55  ~ 4,
-      fio2_enr < 0.5  & pao2_enr <= 60 ~ 3,
-      fio2_enr < 0.5  & pao2_enr <= 70 ~ 1,
-      TRUE                             ~ 0
-    ),
-    
-    ## Acid (pH, or alternatively CO2)
-    acid_ap = case_when(
-      ## If pH is available, use that
-      !is.na(ph_enr) & (ph_enr >= 7.7 | ph_enr < 7.15) ~ 4,
-      !is.na(ph_enr) & (ph_enr >= 7.6 | ph_enr < 7.25) ~ 3,
-      !is.na(ph_enr) &                  ph_enr < 7.33  ~ 2,
-      !is.na(ph_enr) &  ph_enr >= 7.5                  ~ 1,
-      !is.na(ph_enr)                                   ~ 0,
-      ## If neither pH nor CO2 (HCO3) is available, score is missing
-      is.na(co2_enr_high) | is.na(co2_enr_low) ~ as.numeric(NA),
-      ## If CO2 (HCO3) is available, use that
-      co2_enr_high >= 52 | co2_enr_low < 15 ~ 4,
-      co2_enr_high >= 41 | co2_enr_low < 18 ~ 3,
-                           co2_enr_low < 22 ~ 2,
-      co2_enr_high >= 32                    ~ 1,
-      TRUE                                  ~ 0
-    ),
-    
-    ## Sodium
-    na_ap = case_when(
-      is.na(na_enr_high) | is.na(na_enr_low) ~ as.numeric(NA),
-      na_enr_high >= 180 | na_enr_low <= 110 ~ 4,
-      na_enr_high >= 160 | na_enr_low <= 119 ~ 3,
-      na_enr_high >= 155 | na_enr_low <= 129 ~ 2,
-      na_enr_high >= 150                     ~ 1,
-      TRUE                                   ~ 0
-    ),
-    
-    ## Potassium
-    k_ap = case_when(
-      is.na(k_enr_high) | is.na(k_enr_low) ~ as.numeric(NA),
-      k_enr_high >= 7   | k_enr_low < 2.5  ~ 4,
-      k_enr_high >= 6                      ~ 3,
-                          k_enr_low < 3    ~ 2,
-      k_enr_high >= 5.5 | k_enr_low < 3.5  ~ 1,
-      TRUE                                 ~ 0
-    ),
-    
-    ## Creatinine
-    cr_ap = case_when(
-      is.na(cr_enr_high) | is.na(cr_enr_low) ~ as.numeric(NA),
-      cr_enr_high >= 3.5                     ~ 4,
-      cr_enr_high >= 2                       ~ 3,
-      cr_enr_high >= 1.5 | cr_enr_low < 0.6  ~ 2,
-      TRUE                                   ~ 0
-    ),
-    
-    ## Hematocrit/PCV
-    pcv_ap = case_when(
-      is.na(pcv_enr_high) | is.na(pcv_enr_low) ~ as.numeric(NA),
-      pcv_enr_high >= 60 | pcv_enr_low < 20    ~ 4,
-      pcv_enr_high >= 50 | pcv_enr_low < 30    ~ 2,
-      pcv_enr_high >= 46                       ~ 1,
-      TRUE                                     ~ 0
-    ),
-    
-    ## White blood count
-    wbc_ap = case_when(
-      is.na(wbc_enr_high) | is.na(wbc_enr_low) ~ as.numeric(NA),
-      wbc_enr_high >= 40 | wbc_enr_low < 1     ~ 4,
-      wbc_enr_high >= 20 | wbc_enr_low < 3     ~ 2,
-      wbc_enr_high >= 15                       ~ 1,
-      TRUE                                     ~ 0
-    ),
-    
-    ## Glasgow Coma Score
-    gcs_ap = ifelse(is.na(gcs_enr) | gcs_enr == 99, NA, 15 - gcs_enr),
-    
-    ## Age
-    age_ap = case_when(
-      is.na(age_consent) ~ as.numeric(NA),
-      age_consent < 45   ~ 0,
-      age_consent < 55   ~ 2,
-      age_consent < 65   ~ 3,
-      age_consent < 75   ~ 5,
-      TRUE               ~ 6
-    ),
-    
-    ## Chronic disease
-    ## 1. How many actual conditions did patient have?
-    chronic_conditions =
-      rowSums(.[, str_subset(names(.), "^chronic\\_dis\\_[1-5]$")]),
-    ## 2. If patient had >1 condition *and* "none" marked, *or* neither "none"
-    ##    nor any conditions marked, # conditions = NA
-    chronic_conditions = ifelse(
-      (chronic_conditions > 0 & chronic_dis_0) |
-        (chronic_conditions == 0 & chronic_dis_0 == 0), NA,
-      chronic_conditions
-    ),
-    ## 3. If patient had no chronic conditions, 0 points; otherwise, if they
-    ##    had elective surgery, 2 points; otherwise, 5 points
-    chrondis_ap = case_when(
-      is.na(chronic_conditions) |
-        (chronic_conditions > 0 & is.na(apache_chronic_points)) ~ as.numeric(NA),
-      chronic_conditions == 0    ~ 0,
-      apache_chronic_points == 2 ~ 2,
-      TRUE                       ~ 5
-    )
-  )
-
-## Sum components to get versions of APACHE II
-## Vector of APS component names
-vars_apache_aps <- paste0(
-  c("temp", "map", "hr", "rr", "oxy", "acid", "na", "k", "cr", "pcv",
-    "wbc", "gcs"),
-  "_ap"
-)
-## Vector of overall APACHE component names
-vars_apache_all <- c(vars_apache_aps, "age_ap", "chrondis_ap")
-
-## How many components are available?
-baseline$apache_vars_avail <- rowSums(!is.na(baseline[, vars_apache_all]))
-baseline$apache_total_miss0 <- ifelse(
-  baseline$apache_vars_avail == 0, NA,
-  rowSums(baseline[, vars_apache_all], na.rm = TRUE)
-)
-baseline$apache_total_missNA <- ifelse(
-  baseline$apache_vars_avail == 0, NA,
-  rowSums(baseline[, vars_apache_all], na.rm = FALSE)
-)
-
-# ## Plot two different versions
-# ggplot(data = baseline) +
-#   geom_histogram(aes(x = apache_total_miss0), fill = "navy", binwidth = 1, alpha = 0.4) +
-#   geom_histogram(aes(x = apache_total_missNA), fill = "darkgreen", binwidth = 1, alpha = 0.4)
-
-## -- SOFA score ---------------------------------------------------------------
-## References:
-##   Original SOFA paper, Vincent et al (https://doi.org/10.1007/BF01709751)
-##   S/F as substitute for unavailable P/F:
-##     Pandharipande et al https://www.ncbi.nlm.nih.gov/pubmed/19242333
-baseline <- baseline %>%
-  mutate(
     ## Respiratory component: Use P/F if available; otherwise use S/F
-    resp_sofa = case_when(
+    resp_sofa_adm = case_when(
       is.na(pfratio_worst_enr) & is.na(sf_enr) ~ as.numeric(NA),
       pfratio_worst_enr <= 100  ~ 4,
       pfratio_worst_enr <= 200  ~ 3,
@@ -571,9 +395,23 @@ baseline <- baseline %>%
       sf_enr <= 512             ~ 1,
       TRUE                      ~ 0
     ),
+    resp_sofa = case_when(
+      !is.na(resp_sofa_adm)                             ~ resp_sofa_adm,
+      is.na(pf_worst_postadm) & is.na(sf_worst_postadm) ~ as.numeric(NA),
+      pf_worst_postadm <= 100                           ~ 4,
+      pf_worst_postadm <= 200                           ~ 3,
+      pf_worst_postadm <= 300                           ~ 2,
+      pf_worst_postadm <= 400                           ~ 1,
+      !is.na(pf_worst_postadm)                          ~ 0,
+      sf_worst_postadm <= 89                            ~ 4,
+      sf_worst_postadm <= 214                           ~ 3,
+      sf_worst_postadm <= 357                           ~ 2,
+      sf_worst_postadm <= 512                           ~ 1,
+      TRUE                                              ~ 0
+    ),
     
     ## Coagulation
-    coag_sofa = case_when(
+    coag_sofa_adm = case_when(
       is.na(plt_enr) ~ as.numeric(NA),
       plt_enr <= 20  ~ 4,
       plt_enr <= 50  ~ 3,
@@ -581,23 +419,40 @@ baseline <- baseline %>%
       plt_enr <= 150 ~ 1,
       TRUE           ~ 0
     ),
+    coag_sofa = case_when(
+      !is.na(coag_sofa_adm)  ~ coag_sofa_adm,
+      is.na(plt_low_postadm) ~ as.numeric(NA),
+      plt_low_postadm <= 20  ~ 4,
+      plt_low_postadm <= 50  ~ 3,
+      plt_low_postadm <= 100 ~ 2,
+      plt_low_postadm <= 150 ~ 1,
+      TRUE                   ~ 0
+    ),
     
     ## Liver
-    liver_sofa = case_when(
+    liver_sofa_adm = case_when(
       is.na(bilirubin_enr) ~ 0,
-        ## assume no bilirubin = no clinical indication of liver dysfunction
-        ## confirmed by PIs on...
       bilirubin_enr >= 12  ~ 4,
       bilirubin_enr >= 6   ~ 3,
       bilirubin_enr >= 2   ~ 2,
       bilirubin_enr >= 1.2 ~ 1,
       TRUE                 ~ 0
     ),
+    liver_sofa = case_when(
+      ## If liver score was not imputed at consent, use that; otherwise,
+      ## base on bilirubin within the next 2 days; if none of those available,
+      ## *then* assume normal (no clinical indication of liver dysfunction)
+      !is.na(liver_sofa_adm) & !is.na(bilirubin_enr) ~ liver_sofa_adm,
+      is.na(bili_high_postadm)                       ~ 0,
+      bili_high_postadm >= 12                        ~ 4,
+      bili_high_postadm >= 6                         ~ 3,
+      bili_high_postadm >= 2                         ~ 2,
+      bili_high_postadm >= 1.2                       ~ 1,
+      TRUE                                           ~ 0
+    ),
     
-    ## Central nervous system: Use GCS if available; otherwise, use RASS, per
-    ##   Vasilevskis et al https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4748963/
-    ##   Method C has best predictive validity
-    cns_sofa = case_when(
+    ## Central nervous system: Use GCS if available; otherwise, use RASS
+    cns_sofa_adm = case_when(
       (is.na(gcs_enr) | gcs_enr == 99) & is.na(rass_low_enr) ~ as.numeric(NA),
       !is.na(gcs_enr) & gcs_enr < 6  ~ 4,
       !is.na(gcs_enr) & gcs_enr < 10 ~ 3,
@@ -609,44 +464,92 @@ baseline <- baseline %>%
       rass_low_enr == -1             ~ 1,
       TRUE         ~ 0
     ),
+    cns_sofa = case_when(
+      !is.na(cns_sofa_adm)                     ~ cns_sofa_adm,
+      (is.na(gcs_postadm) | gcs_postadm == 99) ~ as.numeric(NA),
+      gcs_postadm < 6                          ~ 4,
+      gcs_postadm < 10                         ~ 3,
+      gcs_postadm < 13                         ~ 2,
+      gcs_postadm < 15                         ~ 1,
+      TRUE                                     ~ 0
+    ),
     
     ## Renal: Look at highest creatinine *and* urine output
-    renal_sofa = case_when(
+    renal_sofa_adm = case_when(
       is.na(cr_enr_high) ~ as.numeric(NA),
       cr_enr_high >= 5   | (!is.na(uo_enr_f) & uo_enr_f == "0-200")   ~ 4,
       cr_enr_high >= 3.5 | (!is.na(uo_enr_f) & uo_enr_f == "201-500") ~ 3,
       cr_enr_high >= 2                                                ~ 2,
       cr_enr_high >= 1.2                                              ~ 1,
       TRUE                                                            ~ 0
-    )
-  ) %>%
-  ## Cardiovascular: already calculated; rename for consistency, create factor
-  ##  version for Table 1
-  rename(cv_sofa = "sofa_cv_enr") %>%
-  mutate(
-    cv_sofa_f = factor(
-      cv_sofa,
+    ),
+    renal_sofa = case_when(
+      !is.na(renal_sofa_adm)                               ~ renal_sofa_adm,
+      is.na(cr_high_postadm)                               ~ as.numeric(NA),
+      cr_high_postadm >= 5   |
+        (!is.na(uo_postadm_f) & uo_postadm_f == "0-200")   ~ 4,
+      cr_high_postadm >= 3.5 |
+        (!is.na(uo_postadm_f) & uo_postadm_f == "201-500") ~ 3,
+      cr_high_postadm >= 2                                 ~ 2,
+      cr_high_postadm >= 1.2                               ~ 1,
+      TRUE                                                 ~ 0
+    ),
+    
+    ## Cardiovascular: If not available at consent, impute later value
+    cv_sofa_adm = sofa_cv_enr,
+    cv_sofa = ifelse(!is.na(cv_sofa_adm), cv_sofa_adm, sofa_cv_postadm),
+    
+    ## Create factor version of CV SOFA for Table 1 (consent only)
+    cv_sofa_adm_f = factor(
+      cv_sofa_adm,
       levels = get_levels_ih("sofa_cv_enr"),
-      labels = get_levels_ih("sofa_cv_enr")
+      labels = names(get_levels_ih("sofa_cv_enr"))
     )
   )
 
 ## Sum components to get versions of SOFA
-## Vector of modified SOFA component names (leaves out CNS; GCS tricky w/ MV pts)
-vars_sofa_mod <- paste0(c("resp", "coag", "liver", "renal", "cv"), "_sofa")
-## Vector of overall SOFA component names
-vars_sofa_all <- c(vars_sofa_mod, "cns_sofa")
+## Vectors of SOFA variable prefixes
+sofa_mod_prefixes <- c("resp", "coag", "liver", "renal", "cv")
+sofa_all_prefixes <- c(sofa_mod_prefixes, "cns")
+
+## Vectors of SOFA variable names
+sofa_mod_vars_adm <- paste0(sofa_mod_prefixes, "_sofa_adm")
+sofa_mod_vars <- paste0(sofa_mod_prefixes, "_sofa")
+sofa_all_vars_adm <- paste0(sofa_all_prefixes, "_sofa_adm")
+sofa_all_vars <- paste0(sofa_all_prefixes, "_sofa")
 
 ## How many components are available?
-baseline$sofa_vars_avail <- rowSums(!is.na(baseline[, vars_sofa_all]))
-baseline$sofa_total_miss0 <- ifelse(
-  baseline$sofa_vars_avail == 0, NA,
-  rowSums(baseline[, vars_sofa_all], na.rm = TRUE)
+baseline$sofa_vars <- rowSums(!is.na(baseline[, sofa_all_vars]))
+baseline$sofa_vars_adm <- rowSums(!is.na(baseline[, sofa_all_vars_adm]))
+baseline$sofa_mod_vars <- rowSums(!is.na(baseline[, sofa_mod_vars]))
+baseline$sofa_mod_vars_adm <- rowSums(!is.na(baseline[, sofa_mod_vars_adm]))
+
+baseline$sofa_adm <- ifelse(
+  baseline$sofa_vars == 0, NA,
+  rowSums(baseline[, sofa_all_vars], na.rm = TRUE)
 )
-baseline$sofa_total_missNA <- ifelse(
-  baseline$sofa_vars_avail == 0, NA,
-  rowSums(baseline[, vars_sofa_all], na.rm = FALSE)
+baseline$sofa_adm_only <- ifelse(
+  baseline$sofa_vars_adm == 0, NA,
+  rowSums(baseline[, sofa_all_vars_adm])
 )
+
+baseline$sofa_mod_adm <- ifelse(
+  baseline$sofa_mod_vars == 0, NA,
+  rowSums(baseline[, sofa_mod_vars], na.rm = TRUE)
+)
+baseline$sofa_mod_adm_only <- ifelse(
+  baseline$sofa_mod_vars_adm == 0, NA,
+  rowSums(baseline[, sofa_mod_vars_adm])
+)
+
+# baseline$sofa_total_miss0 <- ifelse(
+#   baseline$sofa_vars_avail == 0, NA,
+#   rowSums(baseline[, vars_sofa_all], na.rm = TRUE)
+# )
+# baseline$sofa_total_missNA <- ifelse(
+#   baseline$sofa_vars_avail == 0, NA,
+#   rowSums(baseline[, vars_sofa_all], na.rm = FALSE)
+# )
 
 # ## Plot two different versions
 # ggplot(data = baseline) +
@@ -677,3 +580,321 @@ baseline$sofa_total_missNA <- ifelse(
 #   labs(title = "Worst P/F ratio at admission by availability of FiO2")
 #
 # with(demog_raw, table(organ_failures_present_1, is.na(fio2_enr), useNA = "ifany"))
+
+# ## -- APACHE II score --------------------------------------------------------
+# ## Reference: Knaus et al, CCM 1985 Oct; 13(10):818-29
+# ## https://www.ncbi.nlm.nih.gov/pubmed/3928249
+# baseline <- baseline %>%
+#   mutate(
+#     ## Temperature
+#     temp_ap_adm = case_when(
+#       is.na(temp_enr_high)  | is.na(temp_enr_low) ~ as.numeric(NA),
+#       temp_enr_high >= 41   | temp_enr_low < 30   ~ 4,
+#       temp_enr_high >= 39   | temp_enr_low < 32   ~ 3,
+#                               temp_enr_low < 34   ~ 2,
+#       temp_enr_high >= 38.5 | temp_enr_low < 36   ~ 1,
+#       TRUE                                        ~ 0
+#     ),
+#     temp_ap = case_when(
+#       !is.na(temp_ap_adm) ~ temp_ap_adm,
+#       is.na(temp_high_postadm)  | is.na(temp_low_postadm) ~ as.numeric(NA),
+#       temp_high_postadm >= 41   | temp_low_postadm < 30   ~ 4,
+#       temp_high_postadm >= 39   | temp_low_postadm < 32   ~ 3,
+#                                   temp_low_postadm < 34   ~ 2,
+#       temp_high_postadm >= 38.5 | temp_low_postadm < 36   ~ 1,
+#       TRUE                                                ~ 0
+#     ),
+# 
+#     ## Mean arterial pressure
+#     map_ap_adm = case_when(
+#       is.na(map_enr_high) | is.na(map_enr_low) ~ as.numeric(NA),
+#       map_enr_high >= 160 | map_enr_low <= 49  ~ 4,
+#       map_enr_high >= 130                      ~ 3,
+#       map_enr_high >= 110 | map_enr_low <= 70  ~ 2,
+#       TRUE                                     ~ 0
+#     ),
+#     map_ap = case_when(
+#       !is.na(map_ap_adm)                               ~ map_ap_adm,
+#       is.na(map_high_postadm) | is.na(map_low_postadm) ~ as.numeric(NA),
+#       map_high_postadm >= 160 | map_low_postadm <= 49  ~ 4,
+#       map_high_postadm >= 130                          ~ 3,
+#       map_high_postadm >= 110 | map_low_postadm <= 70  ~ 2,
+#       TRUE                                             ~ 0
+#     ),
+#     
+#     ## Heart rate
+#     hr_ap_adm = case_when(
+#       is.na(hr_enr_high) | is.na(hr_enr_low) ~ as.numeric(NA),
+#       hr_enr_high >= 180 | hr_enr_low <= 39  ~ 4,
+#       hr_enr_high >= 140 | hr_enr_low <= 54  ~ 3,
+#       hr_enr_high >= 110 | hr_enr_low <= 69  ~ 2,
+#       TRUE                                   ~ 0
+#     ),
+#     hr_ap = case_when(
+#       !is.na(hr_ap_adm)                              ~ hr_ap_adm,
+#       is.na(hr_high_postadm) | is.na(hr_low_postadm) ~ as.numeric(NA),
+#       hr_high_postadm >= 180 | hr_low_postadm <= 39  ~ 4,
+#       hr_high_postadm >= 140 | hr_low_postadm <= 54  ~ 3,
+#       hr_high_postadm >= 110 | hr_low_postadm <= 69  ~ 2,
+#       TRUE                                           ~ 0
+#     ),
+#     
+#     ## Respiratory rate
+#     rr_ap_adm = case_when(
+#       is.na(rr_enr_high) | is.na(rr_enr_low) ~ as.numeric(NA),
+#       rr_enr_high >= 50  | rr_enr_low <= 5   ~ 4,
+#       rr_enr_high >= 35                      ~ 3,
+#                            rr_enr_low <= 9   ~ 2,
+#       rr_enr_high >= 25  | rr_enr_low <= 11  ~ 1,
+#       TRUE                                   ~ 0
+#     ),
+#     rr_ap = case_when(
+#       !is.na(rr_ap_adm)                              ~ rr_ap_adm,
+#       is.na(rr_high_postadm) | is.na(rr_low_postadm) ~ as.numeric(NA),
+#       rr_high_postadm >= 50  | rr_low_postadm <= 5   ~ 4,
+#       rr_high_postadm >= 35                          ~ 3,
+#                                rr_low_postadm <= 9   ~ 2,
+#       rr_high_postadm >= 25  | rr_low_postadm <= 11  ~ 1,
+#       TRUE                                           ~ 0
+#     ),
+#     
+#     ## Oxygenation: the fun part!
+#     ## If oxygenation info available (FiO2, PCO2, PaO2), calculate A-a gradient:
+#     ## ((713 * FiO2) - (PCO2 / 0.8)) - PaO2; formula confirmed by EWE Dec 2017
+#     ## No oxy info available post-admission; ABG info only collected at consent
+#     aa_ap = ifelse(
+#       is.na(fio2_enr) | is.na(pco2_enr) | is.na(pao2_enr), NA,
+#       ((713 * fio2_enr) - (pco2_enr / 0.8)) - pao2_enr
+#     ),
+#     
+#     ## Need to estimate FiO2; this was not collected if patients didn't get ABG
+#     ## estimated FiO2 = O2 sats / worst S/F ratio
+#     fio2_est = case_when(
+#       !is.na(fio2_enr)                 ~ fio2_enr,
+#       is.na(o2sat_enr) | is.na(sf_enr) ~ as.numeric(NA),
+#       TRUE                             ~ o2sat_enr / sf_enr
+#     ),
+#     
+#     ## If FiO2 >= 0.5, assign points using A-a gradient;
+#     ##   if < 0.5, assign points using PaO2
+#     oxy_ap_adm = case_when(
+#       is.na(fio2_enr)                  ~ as.numeric(NA),
+#       fio2_enr >= 0.5 & aa_ap >= 500   ~ 4,
+#       fio2_enr >= 0.5 & aa_ap >= 350   ~ 3,
+#       fio2_enr >= 0.5 & aa_ap >= 200   ~ 2,
+#       fio2_enr >= 0.5 & aa_ap < 200    ~ 0,
+#       fio2_enr < 0.5  & pao2_enr < 55  ~ 4,
+#       fio2_enr < 0.5  & pao2_enr <= 60 ~ 3,
+#       fio2_enr < 0.5  & pao2_enr <= 70 ~ 1,
+#       TRUE                             ~ 0
+#     ),
+#     oxy_ap = case_when(
+#       !is.na(oxy_ap_adm) ~ oxy_ap_adm,
+#       TRUE ~ as.numeric(NA)
+#     ),
+#     
+#     ## Acid (pH, or alternatively CO2)
+#     ## Note: pH not collected after consent, but CO2 is; use that as last resort
+#     acid_ap_adm = case_when(
+#       ## If pH is available, use that
+#       !is.na(ph_enr) & (ph_enr >= 7.7 | ph_enr < 7.15) ~ 4,
+#       !is.na(ph_enr) & (ph_enr >= 7.6 | ph_enr < 7.25) ~ 3,
+#       !is.na(ph_enr) &                  ph_enr < 7.33  ~ 2,
+#       !is.na(ph_enr) &  ph_enr >= 7.5                  ~ 1,
+#       !is.na(ph_enr)                                   ~ 0,
+#       ## If neither pH nor CO2 (HCO3) is available, score is missing
+#       is.na(co2_enr_high) | is.na(co2_enr_low) ~ as.numeric(NA),
+#       ## If CO2 (HCO3) is available, use that
+#       co2_enr_high >= 52 | co2_enr_low < 15 ~ 4,
+#       co2_enr_high >= 41 | co2_enr_low < 18 ~ 3,
+#                            co2_enr_low < 22 ~ 2,
+#       co2_enr_high >= 32                    ~ 1,
+#       TRUE                                  ~ 0
+#     ),
+#     acid_ap = case_when(
+#       !is.na(acid_ap_adm) ~ acid_ap_adm,
+#       ## If CO2 (HCO3) is never available within 2 days of consent, score missing
+#       is.na(co2_high_postadm) | is.na(co2_low_postadm) ~ as.numeric(NA),
+#       co2_high_postadm >= 52 | co2_low_postadm < 15    ~ 4,
+#       co2_high_postadm >= 41 | co2_low_postadm < 18    ~ 3,
+#                                co2_low_postadm < 22    ~ 2,
+#       co2_high_postadm >= 32                           ~ 1,
+#       TRUE                                             ~ 0
+#     ),
+#     
+#     ## Sodium
+#     na_ap_adm = case_when(
+#       is.na(na_enr_high) | is.na(na_enr_low) ~ as.numeric(NA),
+#       na_enr_high >= 180 | na_enr_low <= 110 ~ 4,
+#       na_enr_high >= 160 | na_enr_low <= 119 ~ 3,
+#       na_enr_high >= 155 | na_enr_low <= 129 ~ 2,
+#       na_enr_high >= 150                     ~ 1,
+#       TRUE                                   ~ 0
+#     ),
+#     na_ap = case_when(
+#       !is.na(na_ap_adm)                              ~ na_ap_adm,
+#       is.na(na_high_postadm) | is.na(na_low_postadm) ~ as.numeric(NA),
+#       na_high_postadm >= 180 | na_low_postadm <= 110 ~ 4,
+#       na_high_postadm >= 160 | na_low_postadm <= 119 ~ 3,
+#       na_high_postadm >= 155 | na_low_postadm <= 129 ~ 2,
+#       na_high_postadm >= 150                         ~ 1,
+#       TRUE                                           ~ 0
+#     ),
+#     
+#     ## Potassium
+#     k_ap_adm = case_when(
+#       is.na(k_enr_high) | is.na(k_enr_low) ~ as.numeric(NA),
+#       k_enr_high >= 7   | k_enr_low < 2.5  ~ 4,
+#       k_enr_high >= 6                      ~ 3,
+#                           k_enr_low < 3    ~ 2,
+#       k_enr_high >= 5.5 | k_enr_low < 3.5  ~ 1,
+#       TRUE                                 ~ 0
+#     ),
+#     k_ap = case_when(
+#       !is.na(k_ap_adm)                             ~ k_ap_adm,
+#       is.na(k_high_postadm) | is.na(k_low_postadm) ~ as.numeric(NA),
+#       k_high_postadm >= 7   | k_low_postadm < 2.5  ~ 4,
+#       k_high_postadm >= 6                          ~ 3,
+#                               k_low_postadm < 3    ~ 2,
+#       k_high_postadm >= 5.5 | k_low_postadm < 3.5  ~ 1,
+#       TRUE                                         ~ 0
+#     ),
+#     
+#     ## Creatinine (only *highest* collected after consent)
+#     ## If patient has acute renal failure, double creatinine score
+#     arf_cr = arf_enr + 1,
+#     cr_ap_adm = case_when(
+#       is.na(cr_enr_high) | is.na(cr_enr_low) ~ as.numeric(NA),
+#       cr_enr_high >= 3.5                     ~ 4 * arf_cr,
+#       cr_enr_high >= 2                       ~ 3 * arf_cr,
+#       cr_enr_high >= 1.5 | cr_enr_low < 0.6  ~ 2 * arf_cr,
+#       TRUE                                   ~ 0
+#     ),
+#     cr_ap = case_when(
+#       !is.na(cr_ap_adm)      ~ cr_ap_adm,
+#       is.na(cr_high_postadm) ~ as.numeric(NA),
+#       cr_high_postadm >= 3.5 ~ 4 * arf_cr,
+#       cr_high_postadm >= 2   ~ 3 * arf_cr,
+#       cr_high_postadm >= 1.5 ~ 2 * arf_cr,
+#       TRUE                   ~ 0
+#     ),
+#     
+#     ## Hematocrit/PCV
+#     pcv_ap_adm = case_when(
+#       is.na(pcv_enr_high) | is.na(pcv_enr_low) ~ as.numeric(NA),
+#       pcv_enr_high >= 60 | pcv_enr_low < 20    ~ 4,
+#       pcv_enr_high >= 50 | pcv_enr_low < 30    ~ 2,
+#       pcv_enr_high >= 46                       ~ 1,
+#       TRUE                                     ~ 0
+#     ),
+#     pcv_ap = case_when(
+#       !is.na(pcv_ap_adm)                               ~ pcv_ap_adm,
+#       is.na(pcv_high_postadm) | is.na(pcv_low_postadm) ~ as.numeric(NA),
+#       pcv_high_postadm >= 60 | pcv_low_postadm < 20    ~ 4,
+#       pcv_high_postadm >= 50 | pcv_low_postadm < 30    ~ 2,
+#       pcv_high_postadm >= 46                           ~ 1,
+#       TRUE                                             ~ 0
+#     ),
+#     
+#     ## White blood count
+#     wbc_ap_adm = case_when(
+#       is.na(wbc_enr_high) | is.na(wbc_enr_low) ~ as.numeric(NA),
+#       wbc_enr_high >= 40 | wbc_enr_low < 1     ~ 4,
+#       wbc_enr_high >= 20 | wbc_enr_low < 3     ~ 2,
+#       wbc_enr_high >= 15                       ~ 1,
+#       TRUE                                     ~ 0
+#     ),
+#     wbc_ap = case_when(
+#       !is.na(wbc_ap_adm)                               ~ wbc_ap_adm,
+#       is.na(wbc_high_postadm) | is.na(wbc_low_postadm) ~ as.numeric(NA),
+#       wbc_high_postadm >= 40 | wbc_low_postadm < 1     ~ 4,
+#       wbc_high_postadm >= 20 | wbc_low_postadm < 3     ~ 2,
+#       wbc_high_postadm >= 15                           ~ 1,
+#       TRUE                                             ~ 0
+#     ),
+#     
+#     ## Glasgow Coma Score
+#     ## Use same conversion for APACHE that Vasilevskis et al use for SOFA,
+#     ##  per TG December 2017
+#     gcs_ap_adm = case_when(
+#       (is.na(gcs_enr) | gcs_enr == 99) & is.na(rass_low_enr) ~ as.numeric(NA),
+#       !is.na(gcs_enr) & gcs_enr != 99                        ~ 15 - gcs_enr,
+#       rass_low_enr <= -4                                     ~ 4,
+#       rass_low_enr == -3                                     ~ 3,
+#       rass_low_enr == -2                                     ~ 2,
+#       rass_low_enr == -1                                     ~ 1,
+#       TRUE                                                   ~ 0
+#     ),
+#     gcs_ap = ifelse(!is.na(gcs_ap_adm), gcs_ap_adm,
+#              ifelse(is.na(gcs_postadm), NA, 15 - gcs_postadm)),
+#     
+#     ## Age
+#     age_ap = case_when(
+#       is.na(age_consent) ~ as.numeric(NA),
+#       age_consent < 45   ~ 0,
+#       age_consent < 55   ~ 2,
+#       age_consent < 65   ~ 3,
+#       age_consent < 75   ~ 5,
+#       TRUE               ~ 6
+#     ),
+#     
+#     ## Chronic disease
+#     ## 1. How many actual conditions did patient have?
+#     chronic_conditions =
+#       rowSums(.[, str_subset(names(.), "^chronic\\_dis\\_[1-5]$")]),
+#     ## 2. If patient had >1 condition *and* "none" marked, *or* neither "none"
+#     ##    nor any conditions marked, # conditions = NA
+#     chronic_conditions = ifelse(
+#       (chronic_conditions > 0 & chronic_dis_0) |
+#         (chronic_conditions == 0 & chronic_dis_0 == 0), NA,
+#       chronic_conditions
+#     ),
+#     ## 3. If patient had no chronic conditions, 0 points; otherwise, if they
+#     ##    had elective surgery, 2 points; otherwise, 5 points
+#     chrondis_ap = case_when(
+#       is.na(chronic_conditions) |
+#         (chronic_conditions > 0 & is.na(apache_chronic_points)) ~ as.numeric(NA),
+#       chronic_conditions == 0    ~ 0,
+#       apache_chronic_points == 2 ~ 2,
+#       TRUE                       ~ 5
+#     )
+#   )
+# 
+# ## Sum components to get versions of APACHE II
+# ## Vectors of APS component names
+# apache_aps_prefixes <- c("temp", "map", "hr", "rr", "oxy", "acid", "na", "k",
+#                          "cr", "pcv", "wbc", "gcs")
+# vars_apache_aps_adm <- paste0(apache_aps_prefixes, "_ap_adm")
+# vars_apache_aps_ever <- paste0(apache_aps_prefixes, "_ap")
+# 
+# ## Vector of overall APACHE component names
+# vars_apache_all_adm <- c(vars_apache_aps_adm, "age_ap", "chrondis_ap")
+# vars_apache_all_ever <- c(vars_apache_aps_ever, "age_ap", "chrondis_ap")
+# 
+# ## How many components are available?
+# baseline$apache_vars_avail_adm <- rowSums(!is.na(baseline[, vars_apache_all_adm]))
+# baseline$apache_vars_avail_ever <- rowSums(!is.na(baseline[, vars_apache_all_ever]))
+# 
+# baseline$apache_total_adm <- ifelse(
+#   baseline$apache_vars_avail_adm == 0, NA,
+#   rowSums(baseline[, vars_apache_all_adm])
+# )
+# baseline$apache_total_ever <- ifelse(
+#   baseline$apache_vars_avail_ever == 0, NA,
+#   rowSums(baseline[, vars_apache_all_ever])
+# )
+# 
+# 
+# # baseline$apache_total_miss0 <- ifelse(
+# #   baseline$apache_vars_avail == 0, NA,
+# #   rowSums(baseline[, vars_apache_all], na.rm = TRUE)
+# # )
+# # baseline$apache_total_missNA <- ifelse(
+# #   baseline$apache_vars_avail == 0, NA,
+# #   rowSums(baseline[, vars_apache_all], na.rm = FALSE)
+# # )
+# 
+# # ## Plot two different versions
+# # ggplot(data = baseline) +
+# #   geom_histogram(aes(x = apache_total_miss0), fill = "navy", binwidth = 1, alpha = 0.4) +
+# #   geom_histogram(aes(x = apache_total_missNA), fill = "darkgreen", binwidth = 1, alpha = 0.4)
