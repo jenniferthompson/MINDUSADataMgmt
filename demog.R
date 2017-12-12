@@ -199,6 +199,11 @@ baseline <- demog_raw %>%
       ifelse(!is.na(uo_enr) & uo_enr > 0, uo_enr, NA),
       levels = 1:3,
       labels = c("0-200", "201-500", "500+")
+    ),
+    icu_rsn = factor(
+      icu_rsn,
+      levels = get_levels_ih("icu_rsn"),
+      labels = names(get_levels_ih("icu_rsn"))
     )
   )
   
@@ -232,6 +237,10 @@ baseline <- baseline %>%
       ifelse(hispanic > 0, 1, 2)),
       levels = 1:2, labels = c("Hispanic or Latino", "Not Hispanic or Latino")
     ),
+    ## BMI (weight (kg) / [height in meters]^2)
+    bmi = ifelse(is.na(weight) | is.na(height), NA,
+                 weight / ((height / 100) ^ 2)),
+    
     ## Home antipsychotics: any vs none
     num_home_antipsyc =
       rowSums(.[, str_subset(names(.), "^home\\_meds\\_antipsych\\_[0-9]+$")]),
@@ -898,3 +907,9 @@ baseline$sofa_mod_adm_only <- ifelse(
 # # ggplot(data = baseline) +
 # #   geom_histogram(aes(x = apache_total_miss0), fill = "navy", binwidth = 1, alpha = 0.4) +
 # #   geom_histogram(aes(x = apache_total_missNA), fill = "darkgreen", binwidth = 1, alpha = 0.4)
+
+## -- Combine prehospital, baseline datasets and save to analysisdata ----------
+adm_df <- left_join(baseline, ph_form, by = "id") %>%
+  select(id, age_consent, gender, race_cat, ethnicity, insurance,
+         height, weight, bmi, home_antipsyc, charlson_total, frailty, frailty_f,
+         icu_rsn, icu_rsn_other, sofa_adm, sofa_mod_adm)
