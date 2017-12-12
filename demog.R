@@ -31,7 +31,7 @@ demog_raw <- import_df(
   id_field = "id",
   export_labels = "none",
   forms = c("enrollment_data_collection_form", "prehospital_form"),
-  fields = c("id", "enroll_time", "icuadm_1_time"),
+  fields = c("id", "enroll_time", "icuadm_1_time", "organ_failures_present"),
   events = "enrollment__day_0_arm_1"
 ) %>%
   ## Remove test patients
@@ -653,3 +653,27 @@ baseline$sofa_total_missNA <- ifelse(
 #   geom_histogram(aes(x = sofa_total_miss0), fill = "navy", binwidth = 1, alpha = 0.4) +
 #   geom_histogram(aes(x = sofa_total_missNA), fill = "darkgreen", binwidth = 1, alpha = 0.4)
 
+# ## -- Explore patients who had vs didn't have FiO2 at enrollment ---------------
+# check_fio2 <- baseline %>%
+#   mutate(has_fio2 = factor(
+#     as.numeric(!is.na(fio2_enr)),
+#     levels = 0:1,
+#     labels = c("No FiO2 available", "Has FiO2")
+#   ))
+# 
+# ggplot(data = check_fio2, aes(x = o2sat_enr)) +
+#   facet_wrap(~ has_fio2) +
+#   geom_histogram() +
+#   labs(title = "O2 sats at admission by availability of FiO2")
+# 
+# ggplot(data = check_fio2, aes(x = sf_enr)) +
+#   facet_wrap(~ has_fio2) +
+#   geom_histogram() +
+#   labs(title = "Worst S/F ratio at admission by availability of FiO2")
+# 
+# ggplot(data = check_fio2, aes(x = pfratio_worst_enr)) +
+#   facet_wrap(~ has_fio2) +
+#   geom_histogram() +
+#   labs(title = "Worst P/F ratio at admission by availability of FiO2")
+#
+# with(demog_raw, table(organ_failures_present_1, is.na(fio2_enr), useNA = "ifany"))
