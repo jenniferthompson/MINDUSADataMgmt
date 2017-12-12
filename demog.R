@@ -31,7 +31,7 @@ demog_raw <- import_df(
   id_field = "id",
   export_labels = "none",
   forms = c("enrollment_data_collection_form", "prehospital_form"),
-  fields = c("id", "enroll_time"),
+  fields = c("id", "enroll_time", "icuadm_1_time"),
   events = "enrollment__day_0_arm_1"
 ) %>%
   ## Remove test patients
@@ -40,6 +40,37 @@ demog_raw <- import_df(
   ##  (they don't handle missings as we want)
   select(-redcap_event_name, -prehospital_form_complete,
          -enrollment_data_collection_form_complete, -iqcode_score)
+
+## -- Download RASS, lab values for SOI scores from daily forms ----------------
+## For APACHE and SOFA components which are missing data at enrollment, we'll
+##  carry values backwards a max of three days
+soi_components <- import_df(
+  rctoken = "MINDUSA_IH_TOKEN",
+  id_field = "id",
+  export_labels = "none",
+  fields = c("id", "daily_date",
+             ## SOFA components
+             "rass_1", "rass_2", "rass_daily_low", "gcs_daily", ## CNS
+             "o2sat_daily", "sf_daily", "pfratio_daily", ## Respiratory
+             "bili_daily", "cr_daily", "uo_daily",       ## Liver, renal
+             "cv_sofa_daily", "plt_daily",               ## CV, coagulation
+             ## Additional APACHE components
+             "temp_daily_low", "temp_daily_high",        ## Temperature
+             "map_daily_low", "map_daily_high",          ## MAP
+             "hr_daily_low", "hr_daily_high",            ## Heart rate
+             "rr_daily_low", "rr_daily_high",            ## Respiratory rate
+             "pcv_daily_low", "pcv_daily_high",          ## Hematocrit
+             "wbc_daily_low", "wbc_daily_high",          ## WBC
+             "co2_daily_low", "co2_daily_high",          ## HCO3/CO2
+             "k_daily_low", "k_daily_high",              ## Potassium
+             "na_daily_low", "na_daily_high"),           ## Sodium
+  events = setdiff(
+    ih_events$unique_event_name,
+    c("randomization_arm_1", "prior_to_hospital_arm_1")
+  )
+) %>%
+  ## Remove test patients
+  filter(!str_detect(toupper(id), "TEST"))
   
 ## -- Prehospital form ---------------------------------------------------------
 ## Helper function to change numeric codes > a certain level to NA
@@ -140,7 +171,9 @@ baseline <- demog_raw %>%
   mutate(
     dob = as.Date(dob, format = "%Y-%m-%d"),
     enroll_time = ymd_hm(enroll_time),
-    enroll_date = date(enroll_time)
+    enroll_date = date(enroll_time),
+    icuadm_time_1 = ymd_hm(icuadm_1_time),
+    icuadm_date_1 = date(icuadm_1_time)
   ) %>%
   
   ## Factors direct from database
@@ -270,10 +303,66 @@ baseline <- baseline %>%
     charlson_total = charlson_1 + charlson_2 + charlson_3 + charlson_6
   )
 
+## -- SOI score prep -----------------------------------------------------------
+## Put all labs, RASS values from daily data collection in a data frame; find
+## closest one to ICU admission within three days; use that for SOI scores
+## Decided December 2017, Monday meeting discussion
+
+soi_daily <- soi_components %>%
+  ## Make urine output a factor for consistency
+  mutate(
+    uo_daily_f = factor(
+      uo_daily,
+      levels = get_levels_ih("uo_daily"),
+      labels = names(get_levels_ih("uo_daily"))
+    ),
+    daily_date = as_date(daily_date)
+  ) %>%
+  select(id, redcap_event_name, daily_date,
+         ## SOFA variables, in order
+         pfratio_daily, sf_daily, plt_daily, bili_daily, cv_sofa_daily,
+         gcs_daily, cr_daily, uo_daily,
+         ## Additional APACHE variables
+         temp_daily_low, temp_daily_high, map_daily_low, map_daily_high,
+         hr_daily_low, hr_daily_high, rr_daily_low, rr_daily_high, na_daily_low,
+         na_daily_high, k_daily_low, k_daily_high, pcv_daily_low, pcv_daily_high,
+         wbc_daily_low, wbc_daily_high, co2_daily_low, co2_daily_high)
+
+names(soi_daily) <- c("id", "event_name", "study_date", "pf_worst", "sf_worst",
+                      "plt_low", "bili_high", "sofa_cv", "gcs", "cr_high",
+                      "uo", "temp_low", "temp_high", "map_low", "map_high",
+                      "hr_low", "hr_high", "rr_low", "rr_high", "na_low",
+                      "na_high", "k_low", "k_high", "pcv_low", "pcv_high",
+                      "wbc_low", "wbc_high", "co2_low", "co2_high")
+
+## Restrict to events within three days of ICU admission, find earliest
+## non-missing value for each quantity
+soi_daily <- soi_daily %>%
+  ## Restrict to events within three days of ICU admission
+  left_join(select(baseline, id, icuadm_date_1)) %>%
+  mutate(
+    days_after_admission =
+      as.numeric(difftime(study_date, icuadm_date_1, units = "days"))
+  ) %>%
+  filter(days_after_admission <= 3) %>%
+  ## Take earliest non-missing value for each value per patient
+  arrange(id, days_after_admission) %>%
+  group_by(id) %>%
+  summarise_at(vars(-study_date, -event_name, -icuadm_date_1),
+               funs(first_notna)) %>%
+  ungroup() %>%
+  rename_at(vars(-id), funs(paste0(., "_postadm")))
+
 ## -- APACHE II score --------------------------------------------------------
 ## Reference: Knaus et al, CCM 1985 Oct; 13(10):818-29
 ## https://www.ncbi.nlm.nih.gov/pubmed/3928249
 baseline <- baseline %>%
+  ## RASS at ICU admission (to use in place of missing GCS)
+  mutate(
+    rass_low_enr = ifelse(
+      scale_enr == 2 & scale_sedated %in% -5:4, scale_sedated, NA
+    )
+  ) %>%
   mutate(
     ## Temperature
     temp_ap = case_when(
@@ -505,13 +594,19 @@ baseline <- baseline %>%
       TRUE                 ~ 0
     ),
     
-    ## Central nervous system
+    ## Central nervous system: Use GCS if available; otherwise, use RASS, per
+    ##   Vasilevskis et al https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4748963/
+    ##   Method C has best predictive validity
     cns_sofa = case_when(
-      is.na(gcs_enr) | gcs_enr == 99 ~ as.numeric(NA),
-      gcs_enr < 6  ~ 4,
-      gcs_enr < 10 ~ 3,
-      gcs_enr < 13 ~ 2,
-      gcs_enr < 15 ~ 1,
+      (is.na(gcs_enr) | gcs_enr == 99) & is.na(rass_low_enr) ~ as.numeric(NA),
+      !is.na(gcs_enr) & gcs_enr < 6  ~ 4,
+      !is.na(gcs_enr) & gcs_enr < 10 ~ 3,
+      !is.na(gcs_enr) & gcs_enr < 13 ~ 2,
+      !is.na(gcs_enr) & gcs_enr < 15 ~ 1,
+      rass_low_enr <= -4             ~ 4,
+      rass_low_enr == -3             ~ 3,
+      rass_low_enr == -2             ~ 2,
+      rass_low_enr == -1             ~ 1,
       TRUE         ~ 0
     ),
     
