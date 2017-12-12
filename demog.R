@@ -909,7 +909,17 @@ baseline$sofa_mod_adm_only <- ifelse(
 # #   geom_histogram(aes(x = apache_total_missNA), fill = "darkgreen", binwidth = 1, alpha = 0.4)
 
 ## -- Combine prehospital, baseline datasets and save to analysisdata ----------
-adm_df <- left_join(baseline, ph_form, by = "id") %>%
-  select(id, age_consent, gender, race_cat, ethnicity, insurance,
-         height, weight, bmi, home_antipsyc, charlson_total, frailty, frailty_f,
-         icu_rsn, icu_rsn_other, sofa_adm, sofa_mod_adm)
+adm_df <- left_join(
+  select(baseline, id, age_consent, gender, race_cat, ethnicity, insurance,
+         height, weight, bmi, home_antipsyc, charlson_total, frailty,
+         frailty_f, icu_rsn, icu_rsn_other, sofa_adm, sofa_mod_adm,
+         cv_sofa_adm_f),
+  ph_form,
+  by = "id") %>%
+  select(id, age_consent, gender, race_cat, ethnicity, english_level, education,
+         insurance, height, weight, bmi, home_antipsyc, charlson_total, frailty,
+         frailty_f, icu_rsn, icu_rsn_other, sofa_adm, sofa_mod_adm,
+         cv_sofa_adm_f)
+
+saveRDS(adm_df, file = "analysisdata/rds/admission.rds")
+write_csv(adm_df, path = "analysisdata/csv/admission.csv")
