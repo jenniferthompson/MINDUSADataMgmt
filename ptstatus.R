@@ -36,7 +36,7 @@ exc_raw <- import_df(
   export_labels = "none"
 ) %>%
   ## Remove test patients
-  filter(!str_detect(toupper(id), "TEST"))
+  filter(!str_detect(toupper(exc_id), "TEST"))
 
 ## -- Download variables needed to determine patient status at enrollment, -----
 ## -- disqualification, randomization, discharge -------------------------------
