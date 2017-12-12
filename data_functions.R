@@ -190,3 +190,12 @@ sd_na <- function(x){ sd(x, na.rm = TRUE) }
 q25 <- function(x){ quantile(x, probs = 0.25, na.rm = TRUE) }
 q50 <- function(x){ quantile(x, probs = 0.50, na.rm = TRUE) }
 q75 <- function(x){ quantile(x, probs = 0.75, na.rm = TRUE) }
+
+##  If all values NA, return NA; otherwise, return first non-missing value
+first_notna <- function(x){
+  if(all(is.na(x))){
+    NA
+  } else{
+    head(x[!is.na(x)], n = 1)
+  }
+}
