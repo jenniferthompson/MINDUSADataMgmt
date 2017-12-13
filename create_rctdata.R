@@ -6,6 +6,7 @@
 
 ## -- Read in datasets from /analysisdata --------------------------------------
 ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
+admission_df <- readRDS("analysisdata/rds/admission.rds")
 ptdrug_df <- readRDS("analysisdata/rds/ptdrug.rds")
 doses_df <- readRDS("analysisdata/rds/doses.rds")
 
@@ -26,5 +27,5 @@ trt_df <- data.frame(
 )
 
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
-save(trt_df, ptstatus_df, ptdrug_df, doses_df,
+save(trt_df, ptstatus_df, admission_df, ptdrug_df, doses_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")
