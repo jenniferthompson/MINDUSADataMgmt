@@ -201,3 +201,8 @@ first_notna <- function(x){
     head(x[!is.na(x)], n = 1)
   }
 }
+
+## Calculate difference in days between two variables
+days_diff <- function(t2, t1, ...){
+  as.numeric(difftime(t2, t1, units = "days", ...))
+}
