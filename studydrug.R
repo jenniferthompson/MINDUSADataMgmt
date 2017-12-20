@@ -40,8 +40,6 @@ drug_raw <- import_df(
     paste0("permanent_stop_other_", 1:3)
   )
 ) %>%
-  ## Remove test patients
-  filter(!str_detect(toupper(id), "TEST")) %>%
   ## Study drug could not be given on "randomziation" or "prior to d/c" events
   filter(!(redcap_event_name %in%
              c("randomization_arm_1", "prior_to_hospital_arm_1")))

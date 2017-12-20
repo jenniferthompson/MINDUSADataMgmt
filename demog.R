@@ -31,8 +31,6 @@ demog_raw <- import_df(
   fields = c("id", "enroll_time", "icuadm_1_time", "organ_failures_present"),
   events = "enrollment__day_0_arm_1"
 ) %>%
-  ## Remove test patients
-  filter(!str_detect(toupper(id), "TEST")) %>%
   ## Remove unneeded variables, REDCap calculated fields
   ##  (they don't handle missings as we want)
   select(-redcap_event_name, -prehospital_form_complete,

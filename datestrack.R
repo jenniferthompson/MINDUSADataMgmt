@@ -38,8 +38,6 @@ dates_raw <- import_df(
   forms = c("dates_tracking_form"),
   events = "enrollment__day_0_arm_1"
 ) %>%
-  ## Remove test patients, restrict to only randomized patients
-  filter(!str_detect(toupper(id), "TEST") & id %in% rand_pts) %>%
   ## Remove unneeded variables, REDCap calculated fields
   ##  (they don't handle missings as we want)
   select(-redcap_event_name, -dates_tracking_form_complete, -starts_with("ntf"),

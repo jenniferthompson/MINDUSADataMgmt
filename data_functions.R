@@ -133,8 +133,13 @@ import_df <- function(rctoken, id_field, ...){
   
   ## REDCap loves to use so many underscores; one per instance seems like plenty
   names(tmp_csv) <- gsub("_+", "_", names(tmp_csv))
+
+  ## Force all IDs to be all caps and use - as separator  
+  tmp_csv[, id_field] <-
+    toupper(str_replace_all(tmp_csv[, id_field], c("[=_]" = "-", "\\." = "")))
   
-  tmp_csv
+  ## Remove test patients
+  tmp_csv[!str_detect(toupper(tmp_csv[, id_field]), "TEST"), ]
 }
 
 ## Example: Read in enrollment qual + dates tracking from only enrollment day
