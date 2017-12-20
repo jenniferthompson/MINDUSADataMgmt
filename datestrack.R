@@ -13,6 +13,7 @@ source("data_functions.R")
 ## -- NAMING CONVENTIONS -------------------------------------------------------
 ## "_exp" = "among those exposed" (eg, time on vent among patients ever on MV)
 ## "_all" = "all patients" (eg, patients never on MV get 0 for this version)
+## "_ih" = "in hospital" (vs ever; eg, death at any point vs in-hospital death)
 
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
@@ -21,8 +22,13 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
+## Wrapper functions to use in-hospital data dictionary
 get_levels_ih <-
   function(varname){ get_factor_levels(ddict = ih_dd, varname = varname) }
+
+make_factor_ih <- function(df, varname){
+  make_factor_dd(df, varname, datadict = ih_dd)
+}
 
 ## -- Bring in ptstatus_df; we'll use some variables from there ----------------
 ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
@@ -61,7 +67,9 @@ time_vars <- time_vars[time_vars %in% names(dates_raw)]
 ## -- Convert all date, time variables -----------------------------------------
 dates_df <- dates_raw %>%
   mutate_at(vars(one_of(date_vars)), ymd) %>%
-  mutate_at(vars(one_of(time_vars)), ymd_hm)
+  mutate_at(vars(one_of(time_vars)), ymd_hm) %>%
+  ## Rename hospital admission time for consistency with ICU admissions
+  rename(hospadm_time = "hosp_admin_time")
 
 ## -- Find "last in-hospital" date/time: ---------------------------------------
 ## If hospital discharge available, use that
@@ -84,6 +92,91 @@ dates_df <- dates_df %>%
     last_inhosp_date = date(last_inhosp_time)
   )
 ## Parse warning is for missing withdrawal times
+
+## -- Calculate overall date/time variables (eg, hospital LOS) -----------------
+## Create factors out of categorical variables
+## Calculate days between hospital, ICU admission and enrollment, randomization;
+##  hospital LOS (days between randomization and first of discharge,
+##  death, or withdrawal); time to events (all beginning at randomization):
+## Time to hospital discharge among patients who were discharged
+## Time to withdrawal among patients who withdrew, ever and in-hospital
+## Time to death among patients who died, ever and in-hospital
+## Time to DNR among those who were made DNR/DNI
+## Time to stroke among those who had one
+## Time to trach among those trached
+dates_df <- dates_df %>%
+  mutate(
+    days_hospadm_enroll = days_diff(enroll_time, hospadm_time),
+    days_hospadm_rand   = days_diff(randomization_time, hospadm_time),
+    days_icuadm_enroll  = days_diff(enroll_time, icuadm_1_time),
+    days_icuadm_rand    = days_diff(randomization_time, icuadm_1_time),
+    hosp_los            = days_diff(last_inhosp_time, randomization_time),
+    daysto_hospdis      = days_diff(hospdis_time, randomization_time),
+    daysto_wd           = days_diff(date(studywd_time), date(randomization_time)),
+    daysto_wd_ih        = ifelse(is.na(hospdis_time), daysto_wd, NA),
+    daysto_death        = days_diff(death_time, randomization_time),
+    daysto_death_ih     = ifelse(is.na(hospdis_time), NA, daysto_death),
+    daysto_dnr          = days_diff(dnr_time, randomization_time),
+    daysto_stroke       = days_diff(stroke_time, randomization_time),
+    daysto_trach        = days_diff(trach_time, randomization_time)
+  ) %>%
+  ## Create factors
+  mutate(
+    ## Died *in hospital* if a) died and b) was not discharged
+    death_ih = factor(
+      as.numeric(death == 1 & hospdis == 0),
+      levels = 0:1, labels = c("No", "Yes")
+    ),
+    ## Withdrew *in hospital* if a) withdrew and b) was not discharged, or if
+    ##   withdrawal date on/before hospital discharge date
+    studywd_ih = factor(
+      as.numeric(
+        studywd == 1 &
+          (hospdis == 0 | date(studywd_time) <= date(hospdis_time))
+      ),
+      levels = 0:1, labels = c("No", "Yes")
+    ),
+    death          = make_factor_ih(., "death"),
+    death_wdtrt    = make_factor_ih(., "death_wdtrt"),
+    studywd        = make_factor_ih(., "studywd"),
+    studywd_person = make_factor_ih(., "studywd_person"),
+    studywd_how    = make_factor_ih(., "studywd_how"),
+    hospdis        = make_factor_ih(., "hospdis"),
+    hospdis_loc    = make_factor_ih(., "hospdis_loc"),
+    hospdis_vent   = make_factor_ih(., "hospdis_vent"),
+    dnr            = make_factor_ih(., "dnr"),
+    sepsis         = make_factor_ih(., "sepsis"),
+    stroke         = make_factor_ih(., "stroke"),
+    neurosx        = make_factor_ih(., "neurosx"),
+    trach          = make_factor_ih(., "trach"),
+    liver_tx       = make_factor_ih(., "liver_tx"),
+    ## Total instances of either type of MV
+    mv_num = int_num + noninv_num
+  ) %>%
+  ## Rename study withdrawal levels, coenrollment studies
+  rename(
+    studywd_writing_further  = "studywd_writing_1",
+    studywd_writing_phi      = "studywd_writing_2",
+    studywd_writing_data     = "studywd_writing_3",
+    studywd_writing_blood    = "studywd_writing_4",
+    studywd_writing_otherreq = "studywd_writing_5", ## _other already taken
+    coenroll_sails      = "coenroll_0",
+    coenroll_aki        = "coenroll_1",
+    coenroll_citrulline = "coenroll_2",
+    coenroll_tylenol    = "coenroll_3",
+    coenroll_balance    = "coenroll_4"
+  )
+
+## CSV of times that look weird
+subset(dates_df,
+       days_hospadm_enroll < 0 | days_hospadm_enroll > 100 |
+         days_hospadm_rand < 0 | days_hospadm_rand > 100 |
+         days_icuadm_enroll < 0 | days_icuadm_enroll > 100 |
+         days_icuadm_rand < 0 | days_icuadm_rand > 100,
+       select = c(id, hospadm_time, icuadm_1_time, enroll_time,
+                  randomization_time, days_hospadm_enroll, days_hospadm_rand,
+                  days_icuadm_enroll, days_icuadm_rand)) %>%
+  write_csv(path = "admissiondate_errors.csv")
 
 ## -- Ventilation. Here. We. Go. -----------------------------------------------
 ## For our purposes, for now, all types of MV (invasive + noninvasive) will be
@@ -295,3 +388,95 @@ mv_summary <- reduce(
 # 
 # subset(first_mv_random, mv_start <= randomization_time & !(rand_mv | rand_nippv)) %>% 
 #   write_csv(path = "rand_onmv_noorgfailure.csv")
+
+## -- ICU length of stay -------------------------------------------------------
+## Total ICU LOS = sum of all individual ICU admissions. If patient has no ICU
+## discharge time, substitute last in-hospital time. For first ICU admission,
+## start the "clock" at randomization, not ICU admission.
+icu_dates <- dates_df %>%
+  select(id,
+         randomization_time,
+         last_inhosp_time,
+         matches("^icuadm\\_[1-6]\\_time$"),
+         matches("^icudis\\_[1-6]\\_time$")) %>%
+  
+  ## Reshape: One row per instance (eg, ICU stay #1), with one column each for
+  ##   admission/discharge times
+  gather(key = keyvar, value = icu_time, icuadm_1_time:icudis_6_time) %>%
+  mutate(keyvar = gsub("^icu|\\_time$", "", keyvar)) %>%
+  separate(keyvar, into = c("icu_date", "icu_stay"), sep = "\\_") %>%
+  spread(key = icu_date, value = icu_time) %>%
+  rename_at(vars(adm, dis), funs(paste0("icu_", .))) %>%
+  
+  ## If no ICU discharge date entered, substitute last in-hospital time
+  mutate(
+    icu_dis_final = ifelse(!is.na(icu_dis), icu_dis, last_inhosp_time)
+  ) %>%
+  mutate_at(
+    vars(icu_adm, icu_dis, icu_dis_final),
+    as.POSIXct, origin = "1970-1-1 00:00", tz = "UTC"
+  ) %>%
+  
+  ## Restrict to only ICU admissions which come after or overlap randomization
+  filter(
+    !is.na(icu_adm) &
+      (icu_adm >= randomization_time |
+         (icu_adm < randomization_time & icu_dis_final >= randomization_time))
+  ) %>%
+  
+  ## Calculate length of each ICU admission
+  mutate(
+    icu_los = ifelse(randomization_time > icu_adm,
+                     days_diff(icu_dis_final, randomization_time),
+                     days_diff(icu_dis_final, icu_adm))
+  )
+  
+## CSV of negative ICU LOSes
+subset(icu_dates, icu_los < 0) %>%
+  write_csv(path = "icudate_errors.csv")
+
+## Summarize ICU LOS for each patient
+icu_summary <- icu_dates %>%
+  group_by(id) %>%
+  summarise_at("icu_los", sum_na) %>%
+  ungroup()
+
+## -- Create final summary dataset ---------------------------------------------
+## For now, leaves out all dates as potential identifiers
+datestrack_df <- reduce(
+  list(
+    subset(ptstatus_df, randomized, select = c(id)),
+    subset(
+      dates_df,
+      select = c(
+        id,
+        coenroll_sails:coenroll_balance,
+        days_hospadm_enroll:days_icuadm_rand,
+        dnr, daysto_dnr, sepsis, stroke, daysto_stroke, neurosx,
+        trach, daysto_trach, liver_tx,
+        int_num, noninv_num, mv_num, icu_readmit_number,
+        death, death_ih, death_wdtrt, death_summary, daysto_death, daysto_death_ih,
+        studywd, studywd_ih, studywd_person:studywd_writing_other,
+        daysto_wd, daysto_wd_ih,
+        hospdis, hospdis_loc, hospdis_loc_other, hospdis_vent,
+        hosp_los, daysto_hospdis
+      )
+    ),
+    mv_summary,
+    icu_summary
+  ),
+  left_join,
+  by = "id"
+) %>%
+  ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
+  ## discharge, withdrawal, death info
+  select(id, coenroll_sails:mv_num, ever_mv, days_mv_all, days_mv_exp,
+         on_mv_atrand, on_mv_rand24, ever_mvlib, daysto_mvlib_exp,
+         daysto_mvlib_all, icu_readmit_number, icu_los, hosp_los,
+         hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
+         studywd, daysto_wd, studywd_ih, daysto_wd_ih,
+         studywd_person:studywd_writing_other,
+         death, death_wdtrt, daysto_death, death_ih, daysto_death_ih)
+
+saveRDS(datestrack_df, file = "analysisdata/rds/datestrack.rds")
+write_csv(datestrack_df, path = "analysisdata/csv/datestrack.csv")
