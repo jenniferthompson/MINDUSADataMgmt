@@ -192,6 +192,15 @@ print_datachecks <- function(msg, df){
   cat("\n\n\n")
 }
 
+## -- Wrapper functions for specific databases ---------------------------------
+## Using in-hospital data dictionary
+get_levels_ih <-
+  function(varname){ get_factor_levels(ddict = ih_dd, varname = varname) }
+
+make_factor_ih <- function(df, varname){
+  make_factor_dd(df, varname, datadict = ih_dd)
+}
+
 ## -- Helper functions ---------------------------------------------------------
 max_na <- function(x){ max(x, na.rm = TRUE) }
 min_na <- function(x){ min(x, na.rm = TRUE) }

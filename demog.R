@@ -17,9 +17,6 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
-get_levels_ih <-
-  function(varname){ get_factor_levels(ddict = ih_dd, varname = varname) }
-
 ## -- Download variables from prehospital, enrollment data collection forms ----
 
 ## From enrollment qualification form: All variables

@@ -22,14 +22,6 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
-## Wrapper functions to use in-hospital data dictionary
-get_levels_ih <-
-  function(varname){ get_factor_levels(ddict = ih_dd, varname = varname) }
-
-make_factor_ih <- function(df, varname){
-  make_factor_dd(df, varname, datadict = ih_dd)
-}
-
 ## -- Bring in ptstatus_df; we'll use some variables from there ----------------
 ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
 
