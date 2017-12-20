@@ -9,6 +9,7 @@ Scripts:
 
 - [ptstatus.R](ptstatus.R): Combines data from exclusion log and in-hospital database to create a dataset, `ptstatus_df`, of patient status at various time points + related information. Automated data checks: `ptstatus_checks.txt`.
 - [demog.R](demog.R): Creates data frame, `admission_df`, of demographic, pre-hospital, and ICU admission information for all consented patients.
+- [datestrack.R](datestrack.R): Creates data frame, `datestrack_df`, of information calculated from Dates Tracking form: ICU and hospital stay variables; mechanical ventilation variables; death, hospital discharge and withdrawal variables. No actual dates are included as a precautionary measure for privacy.
 - [studydrug.R](studydrug.R): Creates two data frames related to study drug administration:
     - `ptdrug_df`: one record per patient, describing number of days and doses of study drug; summarizing amounts of drug and number of times held for various reasons; and reason study drug was first permanently discontinued
     - `doses_df`: one record per potential dose of study drug (up to 3 per day), describing amounts, holds/discontinuations, QTc
