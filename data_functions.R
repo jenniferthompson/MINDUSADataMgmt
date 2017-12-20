@@ -165,6 +165,15 @@ get_factor_levels <- function(ddict, varname){
   return(flevels)
 }
 
+## Wrapper to make a factor using variable names direct from data dictionary
+make_factor_dd <- function(df, x, datadict){
+  factor(
+    df[, x],
+    levels = get_factor_levels(datadict, x),
+    labels = names(get_factor_levels(datadict, x))
+  )
+}
+
 ## Example: Exclusion site factor labels
 ## exc_site_levels <- get_factor_levels(
 ##   ddict = get_datadict("MINDUSA_EXC_TOKEN"),
