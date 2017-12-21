@@ -146,3 +146,48 @@ pad_long <- pad_raw %>%
          rass, rass_incomp_rsn, rass_incomp_other, cam:cam_f2, cam_incomp_rsn,
          cam_incomp_other)
 
+## -- Determine presence of delirium and/or coma on every *day* ----------------
+## Coma: Present if any assessment has RASS -4 or -5
+## Delirium: Present if any assessment has RASS >= -3 and CAM+
+## Daily mental status:
+## - delirious if any delirium present
+## - otherwise, comatose if any coma present
+## - otherwise, normal if at least CAM/RASS done
+pad_long <- pad_long %>%
+  mutate(
+    ## Indicators for whether CAM and/or RASS available (if RASS is -4/-5, can
+    ## still determine status even if CAM missing)
+    ## If RASS > -4 but CAM is UTA, consider CAM missing; this shouldn't happen
+    has_rass = !is.na(rass),
+    has_camrass = !is.na(cam) & !is.na(rass) & !(rass > -4 & cam == "Unable to Assess"),
+    
+    ## Indicators for delirium, coma
+    comatose = ifelse(!has_rass, NA, has_rass & rass < -3),
+    delirious = ifelse(!has_camrass, NA, rass > -4 & cam == "Positive"),
+    braindys =
+      ifelse(is.na(comatose) & is.na(delirious), NA,
+             (!is.na(comatose) & comatose) | (!is.na(delirious) & delirious))
+  )
+
+## Summarise coma, delirium, brain dysfunction; assign mental status each *day*
+pad_daily <- pad_long %>%
+  group_by(id, redcap_event_name) %>%
+  summarise(
+    n_coma = sum(!is.na(comatose)),
+    n_del = sum(!is.na(delirious)),
+    n_dys = sum(!is.na(braindys)),
+    comatose = ifelse(n_coma == 0, NA, sum_na(comatose) > 0),
+    delirious = ifelse(n_del == 0, NA, sum_na(delirious) > 0),
+    braindys = ifelse(n_dys == 0, NA, sum_na(braindys) > 0)
+  ) %>%
+  ungroup() %>%
+  select(-matches("^n\\_")) %>%
+  mutate(
+    mental_status = factor(
+      ifelse(is.na(comatose) | is.na(delirious), NA,
+      ifelse(!is.na(delirious) & delirious, 2,
+      ifelse(!is.na(comatose) & comatose, 3, 1))),
+      levels = 1:3, labels = c("Normal", "Delirious", "Comatose")
+    )
+  )
+
