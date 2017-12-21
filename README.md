@@ -9,7 +9,9 @@ Scripts:
 
 - [fake_make.R](fake_make.R): Sources all following scripts in proper order. One day after a deadline I'll figure out how to do a real makefile. Till then, this'll do.
 - [ptstatus.R](ptstatus.R): Combines data from exclusion log and in-hospital database to create a dataset, `ptstatus_df`, of patient status at various time points + related information. Automated data checks: `ptstatus_checks.txt`.
-- [ptevents.R](ptevents.R): Creates single dataset with all events for each patient, days since consent and randomization (if appropriate), and whether patient was known to be in ICU each day.
+- [ptevents.R](ptevents.R): Creates two datasets:
+    - `allpts_events`: All REDCap events for each patient, days since consent and randomization (if appropriate), and whether patient was known to be in ICU each day
+    - `randpts_events`: A record for every day of the intervention/post-intervention period for every randomized patient, beginning on day of randomization; this includes indicators for patient status each day (in ICU, in REDCap, hospitalized, etc), as well as an overall variable for study status: intervention period; post-intervention period; hospitalized, but no longer being tracked daily; discharged; deceased; or withdrawn.
 - [demog.R](demog.R): Creates data frame, `admission_df`, of demographic, pre-hospital, and ICU admission information for all consented patients.
 - [datestrack.R](datestrack.R): Creates data frame, `datestrack_df`, of information calculated from Dates Tracking form: ICU and hospital stay variables; mechanical ventilation variables; death, hospital discharge and withdrawal variables. No actual dates are included as a precautionary measure for privacy.
 - [studydrug.R](studydrug.R): Creates two data frames related to study drug administration:
