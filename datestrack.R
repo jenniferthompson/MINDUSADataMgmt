@@ -296,15 +296,21 @@ mv_dates <- dates_df %>%
 
 ## -- Summarize each patient's MV experience -----------------------------------
 ## Need to end up with:
-## - Total time on MV (either time)
+## - Total time on MV (either type); per TG December 2017, this should *include*
+##     times patient was off the vent <48h before death or reinitiation
 ## - Time of "liberation from MV" (first successful discont.), two versions:
 ##   - Only for patients who ever *were* successfully liberated
 ##   - TTE outcome time for all pts (substituting last in-hosp time if needed)
 
 ## Calculate total time on any form of MV during entire hospitalization
 mv_los <- mv_dates %>%
+  mutate(
+    ## New LOS variable: if discontinuation was unsuccessful, add actual time on
+    ## MV + time off MV
+    mv_length_succ = ifelse(!mv_dc_success, mv_length + time_off_mv, mv_length)
+  ) %>%
   group_by(id) %>%
-  summarise(days_mv_exp = sum_na(mv_length), ## _exp = among exposed
+  summarise(days_mv_exp = sum_na(mv_length_succ), ## _exp = among exposed
             on_mv_atrand = sum_na(mv_atrand) > 0,
             on_mv_rand24 = sum_na(mv_rand24h) > 0,
             ever_mvlib = sum_na(mv_dc_success) > 0)
