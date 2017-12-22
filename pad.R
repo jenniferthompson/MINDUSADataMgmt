@@ -275,8 +275,8 @@ write_csv(pad_long %>% select(-assess_date, assess_time),
           path = "analysisdata/csv/padasmts.csv")
 
 ## 2. Daily records
-saveRDS(pad_daily, file = "analysisdata/rds/paddays.rds")
-write_csv(pad_daily, path = "analysisdata/csv/paddays.csv")
+saveRDS(pad_daily, file = "analysisdata/rds/paddaily.rds")
+write_csv(pad_daily, path = "analysisdata/csv/paddaily.csv")
 
 ## 3. Summary variables
 saveRDS(pad_summary, file = "analysisdata/rds/padsummary.rds")
