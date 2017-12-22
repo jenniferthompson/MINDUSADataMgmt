@@ -621,6 +621,24 @@ baseline <- baseline %>%
   left_join(o2sat_pao2, by = c("o2sat_low_postadm_int" = "o2sat_int")) %>%
   rename(pao2_est_postadm = "pao2_est") %>%
   
+  ## For O2 sats not included in EPIC II table:
+  ## - If <80, assign lowest PaO2 in table
+  ## - If 100, assign highest PaO2 in table
+  mutate(
+    pao2_est_adm = case_when(
+      !is.na(pao2_est_adm) ~ pao2_est_adm,
+      is.na(o2sat_int)     ~ as.numeric(NA),
+      o2sat_int < 80       ~ 44,
+      TRUE                 ~ 145
+    ),
+    pao2_est_postadm = case_when(
+      !is.na(pao2_est_postadm)     ~ pao2_est_postadm,
+      is.na(o2sat_low_postadm_int) ~ as.numeric(NA),
+      o2sat_low_postadm_int < 80   ~ 44,
+      TRUE                         ~ 145
+    )
+  ) %>%
+
   ## Calculate APACHE component scores
   mutate(
     ## Temperature
