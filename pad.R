@@ -15,6 +15,10 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
+## Read in dataset with all study events for randomized patients; will need this
+## to calculate X within first 14 days inc/after randomization
+randpts_events <- readRDS("analysisdata/rds/randptevents.rds")
+
 ## -- NAMING CONVENTIONS -------------------------------------------------------
 ## "_exp" = "among those exposed" (eg, time on vent among patients ever on MV)
 ## "_all" = "all patients" (eg, patients never on MV get 0 for this version)
@@ -159,15 +163,26 @@ pad_long <- pad_long %>%
     ## still determine status even if CAM missing)
     ## If RASS > -4 but CAM is UTA, consider CAM missing; this shouldn't happen
     has_rass = !is.na(rass),
+    has_cam = !is.na(cam),
     has_camrass = !is.na(cam) & !is.na(rass) & !(rass > -4 & cam == "Unable to Assess"),
     
     ## Indicators for delirium, coma
     comatose = ifelse(!has_rass, NA, has_rass & rass < -3),
     delirious = ifelse(!has_camrass, NA, rass > -4 & cam == "Positive"),
+    ## Currently using most conservative approach: if we can't definitively
+    ## say patient is/is not comatose and delirious, brain dysfunction is NA
     braindys =
-      ifelse(is.na(comatose) & is.na(delirious), NA,
+      ifelse(is.na(comatose) | is.na(delirious), NA,
              (!is.na(comatose) & comatose) | (!is.na(delirious) & delirious))
   )
+
+## Write conflicting CAM/RASSes to CSV for data cleaning
+subset(pad_long,
+       rass > -4 & cam == "Unable to Assess",
+       select = c(id, redcap_event_name, rass, cam)) %>%
+  left_join(ih_events %>% select(event_name, unique_event_name),
+            by = c("redcap_event_name" = "unique_event_name")) %>%
+  write_csv(path = "conflicting_camrass.csv")
 
 ## Summarise coma, delirium, brain dysfunction; assign mental status each *day*
 pad_daily <- pad_long %>%
@@ -176,6 +191,9 @@ pad_daily <- pad_long %>%
     n_coma = sum(!is.na(comatose)),
     n_del = sum(!is.na(delirious)),
     n_dys = sum(!is.na(braindys)),
+    has_rass = sum_na(has_rass) > 0,
+    has_cam = sum_na(has_cam) > 0,
+    has_camrass = sum_na(has_camrass) > 0,
     comatose = ifelse(n_coma == 0, NA, sum_na(comatose) > 0),
     delirious = ifelse(n_del == 0, NA, sum_na(delirious) > 0),
     braindys = ifelse(n_dys == 0, NA, sum_na(braindys) > 0)
@@ -184,10 +202,121 @@ pad_daily <- pad_long %>%
   select(-matches("^n\\_")) %>%
   mutate(
     mental_status = factor(
+      ## Currently using most conservative approach: if we can't definitively
+      ## say that patient is/is not comatose and delirious, mental status is NA
       ifelse(is.na(comatose) | is.na(delirious), NA,
       ifelse(!is.na(delirious) & delirious, 2,
       ifelse(!is.na(comatose) & comatose, 3, 1))),
       levels = 1:3, labels = c("Normal", "Delirious", "Comatose")
     )
+  )
+
+## -- Mental status variables during 14 days including+after randomization -----
+## Currently assumes no imputation; any hospital day that is missing or patient
+##   is withdrawn is essentially assumed to be normal
+
+## Create dataset of only intervention period and determine whether patient was
+## alive and free of delirium and coma
+pad_int <- pad_daily %>%
+  right_join(randpts_events, by = c("id", "redcap_event_name")) %>%
+  filter(study_day %in% 0:13) %>%
+  mutate(
+    dcfree = case_when(
+      study_status == "Deceased"    ~ FALSE,
+      !is.na(comatose) & comatose   ~ FALSE,
+      !is.na(delirious) & delirious ~ FALSE,
+      study_status == "Discharged"  ~ TRUE,
+      !is.na(braindys) & !braindys  ~ TRUE,
+      TRUE                          ~ as.logical(NA)
+    )
+  )
+
+## Summarize mental status variables for each patient
+pad_summary <- pad_int %>%
+  group_by(id) %>%
+  summarise(
+    ## Because RASS was sometimes available when CAM was not, we can determine
+    ##  coma status more frequently than we can determine delirium/overall
+    n_coma_avail = sum(!is.na(comatose)),
+    n_mental_avail = sum(!is.na(mental_status)),
+    n_dcfree_avail = sum(!is.na(dcfree)),
+    n_missing_dcfree = sum(is.na(dcfree)),
+    
+    ## Among all patients
+    coma_int_all = ifelse(n_coma_avail == 0, NA, sum_na(comatose)),
+    del_int_all = ifelse(n_mental_avail == 0, NA, sum_na(delirious)),
+    delcoma_int_all = ifelse(n_mental_avail == 0, NA, sum_na(braindys)),
+    
+    ## Among patients who ever experienced coma/delirium
+    ## Delirium and delirium/coma *should* be the same; as of Dec 2017, we know
+    ##  that one patient has a difference in delirium (0 delirium days)
+    coma_int_exp =
+      ifelse(is.na(coma_int_all) | coma_int_all == 0, NA, coma_int_all),
+    del_int_exp =
+      ifelse(is.na(del_int_all) | del_int_all == 0, NA, del_int_all),
+    delcoma_int_exp =
+      ifelse(is.na(delcoma_int_all) | delcoma_int_all == 0, NA, delcoma_int_all),
+    
+    ## Current calculation: Assume all days with missing info are NORMAL
+    dcfd_int_all = ifelse(
+      n_dcfree_avail == 0, NA,
+      sum(is.na(dcfree)) + sum_na(dcfree)
+    )
+  ) %>%
+  select(id, n_coma_avail, coma_int_all, coma_int_exp, n_mental_avail,
+         del_int_all, del_int_exp, delcoma_int_all, delcoma_int_exp,
+         n_dcfree_avail, dcfd_int_all)
+
+## -- Write datasets to analysisdata -------------------------------------------
+## 1. All assessments
+saveRDS(pad_long %>% select(-assess_date, assess_time),
+        file = "analysisdata/rds/padasmts.rds")
+write_csv(pad_long %>% select(-assess_date, assess_time),
+          path = "analysisdata/csv/padasmts.csv")
+
+## 2. Daily records
+saveRDS(pad_daily, file = "analysisdata/rds/paddays.rds")
+write_csv(pad_daily, path = "analysisdata/csv/paddays.csv")
+
+## 3. Summary variables
+saveRDS(pad_summary, file = "analysisdata/rds/padsummary.rds")
+write_csv(pad_summary, path = "analysisdata/csv/padsummary.csv")
+
+## -- Exploration of missingness -----------------------------------------------
+## Show how many patients had how many days with DCFD info available
+dcfd_avail <- pad_summary %>%
+  ## Did patients ever withdraw from the study?
+  left_join(ptstatus_df %>% select(id, wd_inhosp)) %>%
+  mutate(
+    all_dcfd_avail = factor(
+      as.numeric(n_dcfree_avail == 14),
+      levels = 0:1, labels = c("Missing >=1 day", "All days available")
+    ),
+    wd_inhosp = factor(
+      as.numeric(wd_inhosp),
+      levels = 0:1,
+      labels = c("Remained in study", "Officially withdrew in hospital")
+    )
+  )
+
+ggplot(data = dcfd_avail, aes(x = n_dcfree_avail)) +
+  facet_wrap(~ wd_inhosp) +
+  geom_histogram(aes(fill = all_dcfd_avail), binwidth = 1) +
+  scale_fill_viridis_d(name = "Missing anything?", end = 0.75) +
+  scale_x_continuous(
+    breaks = seq.int(0, 14, 2),
+    name = "Number of days with sufficient info to determine mental status"
+  ) +
+  scale_y_continuous(name = "Count") +
+  labs(
+    title = "Number of days with info available for mental status"
+  )
+
+ms_missing <-
+  subset(
+    pad_int,
+    study_status %in% c("Intervention", "Post-intervention",
+                        "Hospitalized; no longer being assessed") &
+      is.na(mental_status)
   )
 
