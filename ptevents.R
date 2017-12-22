@@ -197,7 +197,16 @@ randpts_events <- cross_df(
   ) %>%
   ## Remove dates, select only variables we need
   select(id, redcap_event_name, study_day, days_since_consent, in_redcap,
-         hospitalized, intervention, postint, in_icu, study_status)
+         hospitalized, intervention, postint, in_icu, study_status) %>%
+  ## Sort by patient, then event
+  arrange(id, study_day)
+
+## Note: One patient has 18 events here, because s/he was randomized at the very
+##  last opportunity on IT day 1, after maxing out all PR days. Others have 19.
+
+## -- Remove date variables from allpts_events ---------------------------------
+allpts_events <-
+  select(allpts_events, id, redcap_event_name, days_since_consent:postint)
 
 ## -- Save both final dataframes to analysisdata -------------------------------
 saveRDS(allpts_events, file = "analysisdata/rds/allptevents.rds")
