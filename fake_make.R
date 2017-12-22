@@ -18,5 +18,5 @@ source("datestrack.R")
 rm(list = ls())
 source("studydrug.R")
 
-# rm(list = ls())
-# source("pad.R")
+rm(list = ls())
+source("pad.R")

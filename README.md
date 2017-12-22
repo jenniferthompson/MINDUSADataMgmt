@@ -17,4 +17,8 @@ Scripts:
 - [studydrug.R](studydrug.R): Creates two data frames related to study drug administration:
     - `ptdrug_df`: one record per patient, describing number of days and doses of study drug; summarizing amounts of drug and number of times held for various reasons; and reason study drug was first permanently discontinued
     - `doses_df`: one record per potential dose of study drug (up to 3 per day), describing amounts, holds/discontinuations, QTc
+- [pad.R](pad.R): Creates three data frames with various levels of detail about the Pain, Agitation and Delirium form:
+    - `pad_long`: Every single assessment done (or that should have been done) during the entire hospitalization
+    - `pad_daily`: One record per *day* during the hospitalization, summarizing whether patient was delirious, comatose, etc that day
+    - `pad_summary`: One record per *patient*, summarizing coma, delirium, and DCFDs during the entire intervention period (study days 0-13)
 - [create_rctdata.R](create_rctdata.R): Sources `fake_make.R` and saves fresh datasets needed to conduct analysis of primary in-hospital aims of the study to a separate repository. [If I use a `make` approach, this should **not** be included, because once the final manuscript version of this dataset is created it will stay constant.]
