@@ -179,6 +179,15 @@ med_df <- daily_raw %>%
 # 
 # walk(drug_sets, check_drug_conversions)
 
-## Remove converted versions from final dataset
 med_df <- med_df %>%
-  select(-matches("^daily\\_[a-z]+\\_"))
+  ## Remove converted versions from final dataset
+  select(-matches("^daily\\_[a-z]+\\_")) %>%
+  ## Add yes/no daily medications back on, create more meaningful variable names
+  left_join(daily_raw %>%
+              select(id, redcap_event_name,
+                     matches("^addl\\_meds\\_cat\\_daily\\_[1, 2, 4, 6]")),
+            by = c("id", "redcap_event_name")) %>%
+  rename(daily_abx = "addl_meds_cat_daily_1",
+         daily_anxio = "addl_meds_cat_daily_2",
+         daily_narc = "addl_meds_cat_daily_4",
+         daily_statin = "addl_meds_cat_daily_6")
