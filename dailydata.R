@@ -17,11 +17,6 @@ source("data_functions.R")
 ## to calculate X within first 14 days inc/after randomization
 randpts_events <- readRDS("analysisdata/rds/randptevents.rds")
 
-## -- NAMING CONVENTIONS -------------------------------------------------------
-## "_exp" = "among those exposed" (eg, time on vent among patients ever on MV)
-## "_all" = "all patients" (eg, patients never on MV get 0 for this version)
-## "_ih" = "in hospital" (vs ever; eg, death at any point vs in-hospital death)
-
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
 ih_dd <- get_datadict("MINDUSA_IH_TOKEN")
@@ -187,7 +182,12 @@ med_df <- med_df %>%
               select(id, redcap_event_name,
                      matches("^addl\\_meds\\_cat\\_daily\\_[1, 2, 4, 6]")),
             by = c("id", "redcap_event_name")) %>%
-  rename(daily_abx = "addl_meds_cat_daily_1",
-         daily_anxio = "addl_meds_cat_daily_2",
-         daily_narc = "addl_meds_cat_daily_4",
-         daily_statin = "addl_meds_cat_daily_6")
+  rename(daily_abx      = "addl_meds_cat_daily_1",
+         daily_anxio    = "addl_meds_cat_daily_2",
+         daily_opioidpo = "addl_meds_cat_daily_4",
+         daily_statin   = "addl_meds_cat_daily_6")
+
+## Note: "Narcotics PO" as an option actually refers to several opioid
+##   medications; we use "opioids" here to increase precision. Specifically,
+##   this asks whether any of the following are given: hydrocodone+acetaminophen,
+##   oxycodone, oxycodone+acetaminophen, and/or tramadol.
