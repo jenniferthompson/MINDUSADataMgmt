@@ -13,8 +13,9 @@ library(googlesheets) ## For reading in drug abbreviations
 ## Source data management functions
 source("data_functions.R")
 
-## Read in dataset with all study events for randomized patients; will need this
-## to calculate X within first 14 days inc/after randomization
+## Read in datasets with all study events for randomized, consented patients;
+## will need them to calculate X within various time periods
+allpts_events <- readRDS("analysisdata/rds/allptevents.rds")
 randpts_events <- readRDS("analysisdata/rds/randptevents.rds")
 
 ## -- Import data dictionaries from REDCap -------------------------------------
@@ -67,9 +68,6 @@ med_df <- daily_raw %>%
   mutate(amt_not = ifelse(is.na(amt_not), "med_name", paste0("med_", amt_not))) %>%
   select(-matches("^junk")) %>%
   spread(key = amt_not, value = med_value) %>%
-  
-  ## Only keep doses actually given
-  filter(!is.na(med_name)) %>%
   
   ## Make factor out of med_name; all daily_med_xxxx variables have same levels
   mutate(
@@ -185,7 +183,8 @@ med_df <- med_df %>%
   rename(daily_abx      = "addl_meds_cat_daily_1",
          daily_anxio    = "addl_meds_cat_daily_2",
          daily_opioidpo = "addl_meds_cat_daily_4",
-         daily_statin   = "addl_meds_cat_daily_6")
+         daily_statin   = "addl_meds_cat_daily_6") %>%
+  right_join(allpts_events, by = c("id", "redcap_event_name"))
 
 ## Note: "Narcotics PO" as an option actually refers to several opioid
 ##   medications; we use "opioids" here to increase precision. Specifically,
