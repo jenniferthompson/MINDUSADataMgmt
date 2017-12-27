@@ -244,8 +244,11 @@ pad_summary <- pad_int %>%
     
     ## Among all patients
     coma_int_all = ifelse(n_coma_avail == 0, NA, sum_na(comatose)),
+    ever_coma_int = ifelse(is.na(coma_int_all), NA, coma_int_all > 0),
     del_int_all = ifelse(n_mental_avail == 0, NA, sum_na(delirious)),
+    ever_del_int = ifelse(is.na(del_int_all), NA, del_int_all > 0),
     delcoma_int_all = ifelse(n_mental_avail == 0, NA, sum_na(braindys)),
+    ever_delcoma_int = ifelse(is.na(delcoma_int_all), NA, delcoma_int_all > 0),
     
     ## Among patients who ever experienced coma/delirium
     ## Delirium and delirium/coma *should* be the same; as of Dec 2017, we know
@@ -263,8 +266,9 @@ pad_summary <- pad_int %>%
       sum(is.na(dcfree)) + sum_na(dcfree)
     )
   ) %>%
-  select(id, n_coma_avail, coma_int_all, coma_int_exp, n_mental_avail,
-         del_int_all, del_int_exp, delcoma_int_all, delcoma_int_exp,
+  select(id, n_coma_avail, ever_coma_int, coma_int_all, coma_int_exp,
+         n_mental_avail, ever_del_int, del_int_all, del_int_exp,
+         ever_delcoma_int, delcoma_int_all, delcoma_int_exp,
          n_dcfree_avail, dcfd_int_all)
 
 ## -- Write datasets to analysisdata -------------------------------------------
