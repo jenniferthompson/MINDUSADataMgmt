@@ -11,7 +11,8 @@ The following variable naming conventions are used:
 
 - `_exp`: "among those exposed" *(eg, time on vent among patients ever on MV)*
 - `_all`: "all patients" *(eg, patients never on MV get 0 for this version)*
-- `_ih`: "in hospital" *(eg, in-hospital death vs death at any point, or total drug doses on all hospital days vs only intervention or only ICU days)*
+- `_ih`: "in hospital" *(eg, in-hospital death vs death at any point, or total drug doses on all hospital days, vs only intervention or only ICU days)*
+- `_pr`: "pre-randomization" *(period between consent and randomization)*
 - `_int`: "intervention" *(randomization + 13 following days)*
 - `_icu`: "ICU" *(eg, only on ICU days, vs days on the floor)*
 
