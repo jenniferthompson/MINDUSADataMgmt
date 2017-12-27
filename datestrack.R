@@ -10,11 +10,6 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
-## -- NAMING CONVENTIONS -------------------------------------------------------
-## "_exp" = "among those exposed" (eg, time on vent among patients ever on MV)
-## "_all" = "all patients" (eg, patients never on MV get 0 for this version)
-## "_ih" = "in hospital" (vs ever; eg, death at any point vs in-hospital death)
-
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
 ih_dd <- get_datadict("MINDUSA_IH_TOKEN")

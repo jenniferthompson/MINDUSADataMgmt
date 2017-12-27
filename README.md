@@ -5,7 +5,17 @@ Each script creates a single data.frame, which are then stored in the `analysisd
 
 Each script also produces a text file with automated data checks. The user should examine each of these files for anomalies when recreating the datasets; to preserve patient confidentiality, these files are **not** tracked with git.
 
-Scripts:
+### Naming conventions
+
+The following variable naming conventions are used:
+
+- `_exp`: "among those exposed" *(eg, time on vent among patients ever on MV)*
+- `_all`: "all patients" *(eg, patients never on MV get 0 for this version)*
+- `_ih`: "in hospital" *(eg, in-hospital death vs death at any point, or total drug doses on all hospital days vs only intervention or only ICU days)*
+- `_int`: "intervention" *(randomization + 13 following days)*
+- `_icu`: "ICU" *(eg, only on ICU days, vs days on the floor)*
+
+### Scripts
 
 - [fake_make.R](fake_make.R): Sources all following scripts in proper order. One day after a deadline I'll figure out how to do a real makefile. Till then, this'll do.
 - [ptstatus.R](ptstatus.R): Combines data from exclusion log and in-hospital database to create a dataset, `ptstatus_df`, of patient status at various time points + related information. Automated data checks: `ptstatus_checks.txt`.
