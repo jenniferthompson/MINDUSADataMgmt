@@ -94,6 +94,8 @@ med_df <- daily_raw %>%
   left_join(icudel_meds, by = "med_name") %>%
   mutate(med_abbrev = paste0("daily_", med_abbrev)) %>%
   select(-med_name) %>%
+  ## Note: We need the daily_NA level here to keep at least one record per
+  ##  hospitalization day; we'll throw out that variable later
   
   ## Reshape back to wide format, one record per day with one column per med
   spread(key = med_abbrev, value = med_total) %>%
@@ -173,8 +175,9 @@ med_df <- daily_raw %>%
 # walk(drug_sets, check_drug_conversions)
 
 med_df <- med_df %>%
-  ## Remove converted versions from final dataset
-  select(-matches("^daily\\_[a-z]+\\_")) %>%
+  ## Remove converted versions and meaningless daily_NA from final dataset
+  ## (daily_NA is an artifact of the reshaping process)
+  select(-daily_NA, -matches("^daily\\_[a-z]+\\_")) %>%
   ## Add yes/no daily medications back on, create more meaningful variable names
   left_join(daily_raw %>%
               select(id, redcap_event_name,
@@ -190,3 +193,89 @@ med_df <- med_df %>%
 ##   medications; we use "opioids" here to increase precision. Specifically,
 ##   this asks whether any of the following are given: hydrocodone+acetaminophen,
 ##   oxycodone, oxycodone+acetaminophen, and/or tramadol.
+
+## -- Calculate summary drug variables: mean daily and total during... ---------
+## - Entire hospitalization
+## - Pre-randomization period (consent -> randomization)
+## - Intervention period (randomization + next 13 days, as long as hospitalized)
+## - All ICU days, regardless of time period
+## - All ICU days during intervention period
+
+## NOTE: For patients who received each drug, "all" and "exposed" values of days
+##    and total dose will be the same. This is **not** true for mean dose.
+##    mean_all = total dose / number of days *in the time period* (eg, in
+##      hospital). We may use this as a covariate in models for long-term
+##      outcomes, for example, to describe the average daily sedative given
+##      while in the hospital; patients who never received the drug have a 0.
+##    mean_exp = total dose / number of days *received the drug during the time
+##      period*. This is a more accurate representation for *describing* what
+##      happens during the study - when patients got Drug X, how much did they
+##      get on an average day?
+
+## Prep: Medication categories will be treated differently than med doses
+med_cats <- c("abx", "anxio", "opioidpo", "statin")
+med_cats_regex <- paste(med_cats, collapse = "|")
+
+## Write a function to calculate the same drug variables for a given time period
+calc_med_vars <- function(
+  df,    ## data.frame including only desired patient-days
+  suffix ## suffix to add to variable names to indicate time period
+){
+  df %>%
+    group_by(id) %>%
+    summarise_at(
+      vars(starts_with("daily_")),
+      funs(days_all = sum_na(. > 0),     ## number of days received drug
+           prop_days = mean_na(. > 0),   ## proportion of days received drug
+           mean_all = mean_na(.),        ## total dose / days in hospital
+           mean_exp = mean_na(.[. > 0]), ## mean dose on days *received* drug
+           total_all = sum_na(.))        ## total dose, all patients
+    ) %>%
+    ## Strip "daily_" from all variable names
+    rename_all(funs(str_replace(., "^daily\\_", ""))) %>%
+    ## Create additional "among exposed" variables
+    ## Days
+    mutate_at(
+      vars(matches("\\_days\\_all$")), funs(days_exp = ifelse(. > 0, ., NA))
+    ) %>%
+    rename_at(
+      vars(matches("\\_days\\_all\\_days\\_exp")),
+      funs(str_replace(., "days\\_all\\_", ""))
+    ) %>%
+    ## Total
+    mutate_at(
+      vars(matches("\\_total\\_all$")), funs(total_exp = ifelse(. > 0, ., NA))
+    ) %>%
+    rename_at(
+      vars(matches("\\_total\\_all\\_total\\_exp")),
+      funs(str_replace(., "total\\_all\\_", ""))
+    ) %>%
+    ## For medication categories, mean & total variables are duplicates of days
+    ##   and proportion variables; remove unneeded columns
+    select(
+      ## Remove "mean among exposed"; always 1
+      -matches(sprintf("(%s)\\_mean\\_exp$", med_cats_regex)),
+      ## Remove "total"; same as "days"
+      -matches(sprintf("(%s)\\_total\\_(all|exp)$", med_cats_regex)),
+      ## Remove "mean among all"; same as "prop_days"
+      -matches(sprintf("(%s)\\_mean\\_all$", med_cats_regex))
+    ) %>%
+    ## Taking the mean of all NAs (_exp) results in NaN; turn these into NA
+    mutate_all(funs(ifelse(is.nan(.), NA, .))) %>%
+    ## Add _ih suffix to everything
+    rename_at(vars(-id), funs(paste(., suffix, sep = "_"))) %>%
+    ungroup()
+}
+
+med_ih <- calc_med_vars(med_df, "ih")
+med_pr <- calc_med_vars(med_df %>% filter(prerandom), "pr")
+med_int <- calc_med_vars(med_df %>% filter(intervention), "int")
+med_icu <- calc_med_vars(med_df %>% filter(in_icu), "icu")
+med_int_icu <- calc_med_vars(med_df %>% filter(intervention & in_icu), "int_icu")
+
+## Join all medication summary variables into a single, gigantic dataset
+med_summary <- reduce(
+  list(med_ih, med_pr, med_int, med_icu, med_int_icu),
+  left_join,
+  by = "id"
+)
