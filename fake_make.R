@@ -6,9 +6,11 @@
 rm(list = ls())
 source("ptstatus.R")
 
+## Have to run ptevents.R next; it is used in other scripts
 rm(list = ls())
 source("ptevents.R")
 
+## From here on out these should stand alone
 rm(list = ls())
 source("demog.R")
 
@@ -20,3 +22,6 @@ source("studydrug.R")
 
 rm(list = ls())
 source("pad.R")
+
+rm(list = ls())
+source("dailydata.R")
