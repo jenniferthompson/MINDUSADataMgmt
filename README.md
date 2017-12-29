@@ -15,6 +15,7 @@ The following variable naming conventions are used:
 - `_pr`: "pre-randomization" *(period between consent and randomization)*
 - `_int`: "intervention" *(randomization + 13 following days)*
 - `_icu`: "ICU" *(eg, only on ICU days, vs days on the floor)*
+- `_adm`: "at ICU admission" *(eg, SOFA at ICU admission, vs daily in ICU)*
 
 ### Scripts
 
