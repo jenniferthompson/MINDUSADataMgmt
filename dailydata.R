@@ -291,7 +291,7 @@ med_summary <- reduce(
 ##     Vasilevskis et al https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4748963/
 ##     Method C has best predictive validity
 sofa_df <- daily_raw %>%
-  select(id, redcap_event_name, daily_date, abcde_icu, pfratio_daily, sf_daily,
+  select(id, redcap_event_name, abcde_icu, pfratio_daily, sf_daily,
          plt_daily, bili_daily, gcs_daily, rass_daily_low, cr_daily, uo_daily,
          cv_sofa_daily) %>%
   ## Create factors of some variables, making "not available" NA
@@ -395,7 +395,7 @@ sofa_df <- sofa_df %>%
 ## For missing components, find closest available component score within +/-2
 ## days to impute. If length of time is the same (eg, missing day has a value
 ## the day before and after), prioritize the earlier one.
-sofa_df2 <- sofa_df %>%
+sofa_df <- sofa_df %>%
   group_by(id) %>%
   mutate_at(
     vars(ends_with("_sofa_raw")), funs(imp = impute_closest(.))
@@ -403,81 +403,195 @@ sofa_df2 <- sofa_df %>%
   ungroup() %>%
   rename_at(
     vars(ends_with("_raw_imp")), funs(str_replace(., "\\_raw", ""))
+  ) %>%
+  ## For liver component *only*, if data is still missing after imputation,
+  ## assign a value of 0 (normal); we assume that no bilirubin available
+  ## indicates no clinical reason to suspect liver dysfunction.
+  mutate(
+    liver_sofa_imp = ifelse(is.na(liver_sofa_imp), 0, liver_sofa_imp)
+  )
+  
+# ## Look at missingness of SOFA components
+# library(naniar)
+# sofa_comp_df <-
+#   sofa_df[, grep("(abcde\\_icu|days\\_since\\_consent|\\_sofa\\_raw|\\_sofa\\_imp)$",
+#                  names(sofa_df2))]
+# 
+# vis_miss(
+#   sofa_comp_df %>%
+#     filter(abcde_icu == 1) %>%
+#     select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
+#            cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
+#            liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
+# ) + ggtitle("ICU Days Only")
+# 
+# vis_miss(
+#   sofa_comp_df %>%
+#     filter(abcde_icu == 0) %>%
+#     select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
+#            cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
+#            liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
+# ) + ggtitle("Non-ICU Days Only")
+# 
+# vis_miss(
+#   sofa_comp_df %>%
+#     filter(is.na(abcde_icu)) %>%
+#     select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
+#            cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
+#            liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
+# ) + ggtitle("No ABCDE Form (Missing ICU Day Question)")
+
+## Sum components to get versions of SOFA
+## Vectors of SOFA variable prefixes
+sofa_mod_prefixes <- c("resp", "coag", "liver", "renal", "cv")
+sofa_all_prefixes <- c(sofa_mod_prefixes, "cns")
+
+## Vectors of SOFA variable names
+sofa_mod_vars_raw <- paste0(sofa_mod_prefixes, "_sofa_raw")
+sofa_mod_vars_imp <- paste0(sofa_mod_prefixes, "_sofa_imp")
+sofa_all_vars_raw <- paste0(sofa_all_prefixes, "_sofa_raw")
+sofa_all_vars_imp <- paste0(sofa_all_prefixes, "_sofa_imp")
+
+## How many components are available?
+sofa_df$sofa_vars_raw <- rowSums(!is.na(sofa_df[, sofa_all_vars_raw]))
+sofa_df$sofa_vars_imp <- rowSums(!is.na(sofa_df[, sofa_all_vars_imp]))
+sofa_df$sofa_mod_vars_raw <- rowSums(!is.na(sofa_df[, sofa_mod_vars_raw]))
+sofa_df$sofa_mod_vars_imp <- rowSums(!is.na(sofa_df[, sofa_mod_vars_imp]))
+
+## Calculate totals; using na.rm = TRUE means that components still missing
+## after looking ahead will be considered normal
+
+## Overall SOFA
+sofa_df$sofa_raw <- ifelse(
+  sofa_df$sofa_vars_raw == 0, NA,
+  rowSums(sofa_df[, sofa_all_vars_raw], na.rm = TRUE)
+)
+sofa_df$sofa_imp <- ifelse(
+  sofa_df$sofa_vars_imp == 0, NA,
+  rowSums(sofa_df[, sofa_all_vars_imp], na.rm = TRUE)
+)
+
+## Modified SOFA (no CNS component)
+sofa_df$sofa_mod_raw <- ifelse(
+  sofa_df$sofa_mod_vars_raw == 0, NA,
+  rowSums(sofa_df[, sofa_mod_vars_raw], na.rm = TRUE)
+)
+sofa_df$sofa_mod_imp <- ifelse(
+  sofa_df$sofa_mod_vars_imp == 0, NA,
+  rowSums(sofa_df[, sofa_mod_vars_imp], na.rm = TRUE)
+)
+
+# ## Check distributions
+# ggplot(data = sofa_df, aes(x = sofa_raw)) +
+#   geom_bar(stat = "count") +
+#   labs(
+#     caption =
+#       sprintf(
+#         "SOFA using raw data only, with missing data = normal; %s (%s%%) have no components available",
+#         sum(is.na(sofa_df$sofa_raw)),
+#         round(mean(is.na(sofa_df$sofa_raw))*100)
+#       )
+#   )
+# 
+# ggplot(data = sofa_df, aes(x = sofa_imp)) +
+#   geom_bar(stat = "count") +
+#   labs(
+#     caption =
+#       sprintf(
+#         "SOFA using imputed data, with missing data = normal; %s (%s%%) have no components available",
+#         sum(is.na(sofa_df$sofa_imp)),
+#         round(mean(is.na(sofa_df$sofa_imp))*100)
+#       )
+#   )
+# 
+# ggplot(data = sofa_df, aes(x = sofa_mod_raw)) +
+#   geom_bar(stat = "count") +
+#   labs(
+#     caption =
+#       sprintf(
+#         "Modified SOFA using raw data only, with missing data = normal; %s (%s%%) have no components available",
+#         sum(is.na(sofa_df$sofa_mod_raw)),
+#         round(mean(is.na(sofa_df$sofa_mod_raw))*100)
+#       )
+#   )
+# 
+# ggplot(data = sofa_df, aes(x = sofa_mod_imp)) +
+#   geom_bar(stat = "count") +
+#   labs(
+#     caption =
+#       sprintf(
+#         "Modified SOFA using imputed data, with missing data = normal; %s (%s%%) have no components available",
+#         sum(is.na(sofa_df$sofa_mod_imp)),
+#         round(mean(is.na(sofa_df$sofa_mod_imp))*100)
+#       )
+#   )
+
+## -- Calculate summary SOFA variables: mean daily during... -------------------
+## - Entire hospitalization
+## - Pre-randomization period (consent -> randomization)
+## - Intervention period (randomization + next 13 days, as long as hospitalized)
+## - All ICU days, regardless of time period
+## - All ICU days during intervention period
+
+sofa_df <- sofa_df %>%
+  left_join(
+    select(allpts_events, id, redcap_event_name, prerandom, intervention, in_icu),
+    by = c("id", "redcap_event_name")
   )
 
-  
+## Write a function to calculate the same SOFA variables for a given time period
+calc_sofa_vars <- function(
+  df,    ## data.frame including only desired patient-days
+  suffix ## suffix to add to variable names to indicate time period
+){
+  df %>%
+    group_by(id) %>%
+    summarise_at(
+      vars(sofa_raw:sofa_mod_imp),
+      funs(mean = mean_na, ## mean during period
+           max = max_na,   ## max during period
+           min = min_na)   ## min during period
+    ) %>%
+    rename_at(vars(-id), funs(paste(., suffix, sep = "_"))) %>%
+    ungroup()
+}
 
-## Look at missingness of SOFA components
-library(naniar)
-sofa_comp_df <-
-  sofa_df2[, grep("(abcde\\_icu|days\\_since\\_consent|\\_sofa\\_raw|\\_sofa\\_imp)$",
-                 names(sofa_df2))]
+sofa_ih  <- calc_sofa_vars(sofa_df, "ih")
+sofa_pr  <- calc_sofa_vars(sofa_df %>% filter(prerandom), "pr")
+sofa_int <- calc_sofa_vars(sofa_df %>% filter(intervention), "int")
+sofa_icu <- calc_sofa_vars(sofa_df %>% filter(in_icu), "icu")
+sofa_int_icu <-
+  calc_sofa_vars(sofa_df %>% filter(intervention & in_icu), "int_icu")
 
-vis_miss(
-  sofa_comp_df %>%
-    filter(abcde_icu == 1) %>%
-    select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
-           cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
-           liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
-) + ggtitle("ICU Days Only")
+## Join all medication summary variables into a single, gigantic dataset
+sofa_summary <- reduce(
+  list(sofa_ih, sofa_pr, sofa_int, sofa_icu, sofa_int_icu),
+  left_join,
+  by = "id"
+)
 
-vis_miss(
-  sofa_comp_df %>%
-    filter(abcde_icu == 0) %>%
-    select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
-           cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
-           liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
-) + ggtitle("Non-ICU Days Only")
+## -- Combine daily, summary information into single datasets ------------------
+daily_df <- reduce(
+  list(
+    med_df %>% select(-(days_since_consent:postint)),
+    sofa_df %>% select(-abcde_icu, -(prerandom:in_icu))
+  ),
+  left_join, by = c("id", "redcap_event_name")
+)
 
-vis_miss(
-  sofa_comp_df %>%
-    filter(is.na(abcde_icu)) %>%
-    select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
-           cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
-           liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
-) + ggtitle("No ABCDE Form (Missing ICU Day Question)")
+dailysum_df <- reduce(
+  list(
+    med_summary,
+    sofa_summary
+  ),
+  left_join, by = c("id")
+)
 
+## -- Save analysis datasets to /analysisdata ----------------------------------
+## Daily data
+saveRDS(daily_df, file = "analysisdata/rds/dailydata.rds")
+write_csv(daily_df, path = "analysisdata/csv/dailydata.csv")
 
-# ## Sum components to get versions of SOFA
-# ## Vectors of SOFA variable prefixes
-# sofa_mod_prefixes <- c("resp", "coag", "liver", "renal", "cv")
-# sofa_all_prefixes <- c(sofa_mod_prefixes, "cns")
-# 
-# ## Vectors of SOFA variable names
-# sofa_mod_vars_adm <- paste0(sofa_mod_prefixes, "_sofa_adm")
-# sofa_mod_vars <- paste0(sofa_mod_prefixes, "_sofa")
-# sofa_all_vars_adm <- paste0(sofa_all_prefixes, "_sofa_adm")
-# sofa_all_vars <- paste0(sofa_all_prefixes, "_sofa")
-# 
-# ## How many components are available?
-# baseline$sofa_vars <- rowSums(!is.na(baseline[, sofa_all_vars]))
-# baseline$sofa_vars_adm <- rowSums(!is.na(baseline[, sofa_all_vars_adm]))
-# baseline$sofa_mod_vars <- rowSums(!is.na(baseline[, sofa_mod_vars]))
-# baseline$sofa_mod_vars_adm <- rowSums(!is.na(baseline[, sofa_mod_vars_adm]))
-# 
-# ## Calculate totals; using na.rm = TRUE means that components still missing
-# ## after looking ahead will be considered normal
-# 
-# ## Overall SOFA, using day of admission + days and day of admission only
-# baseline$sofa_adm <- ifelse(
-#   baseline$sofa_vars == 0, NA,
-#   rowSums(baseline[, sofa_all_vars], na.rm = TRUE)
-# )
-# baseline$sofa_adm_only <- ifelse(
-#   baseline$sofa_vars_adm == 0, NA,
-#   rowSums(baseline[, sofa_all_vars_adm])
-# )
-# 
-# ## Modified SOFA (no CNS component)
-# baseline$sofa_mod_adm <- ifelse(
-#   baseline$sofa_mod_vars == 0, NA,
-#   rowSums(baseline[, sofa_mod_vars], na.rm = TRUE)
-# )
-# baseline$sofa_mod_adm_only <- ifelse(
-#   baseline$sofa_mod_vars_adm == 0, NA,
-#   rowSums(baseline[, sofa_mod_vars_adm])
-# )
-# 
-# 
-# 
-# 
+## Summary variables
+saveRDS(dailysum_df, file = "analysisdata/rds/dailysummary.rds")
+write_csv(dailysum_df, path = "analysisdata/csv/dailysummary.csv")
