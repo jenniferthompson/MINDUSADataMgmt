@@ -53,7 +53,9 @@ daily_raw <- import_df(
   )
 ) %>%
   ## Remove unneeded variables
-  select(-daily_data_collection_form_complete)
+  select(-daily_data_collection_form_complete) %>%
+  ## Restrict to "real" events, as determined in ptevents.R
+  right_join(allpts_events, by = c("id", "redcap_event_name"))
 
 ## -- Medications --------------------------------------------------------------
 ## Medications collected as "1. What was med 1? 2. What was dose of med 1?"
@@ -279,3 +281,203 @@ med_summary <- reduce(
   left_join,
   by = "id"
 )
+
+## -- Daily SOFA ---------------------------------------------------------------
+## References:
+##   Original SOFA paper, Vincent et al (https://doi.org/10.1007/BF01709751)
+##   S/F as substitute for unavailable P/F:
+##     Pandharipande et al https://www.ncbi.nlm.nih.gov/pubmed/19242333
+##   RASS as substitute for unavailable GCS:
+##     Vasilevskis et al https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4748963/
+##     Method C has best predictive validity
+sofa_df <- daily_raw %>%
+  select(id, redcap_event_name, daily_date, abcde_icu, pfratio_daily, sf_daily,
+         plt_daily, bili_daily, gcs_daily, rass_daily_low, cr_daily, uo_daily,
+         cv_sofa_daily) %>%
+  ## Create factors of some variables, making "not available" NA
+  mutate(
+    gcs_daily = na_if(gcs_daily, 99),
+    rass_daily_low =
+      as.numeric(as.character(make_factor_ih(., "rass_daily_low"))),
+    uo_daily = factor(
+      ifelse(uo_daily == 0, NA, uo_daily),
+      levels = 1:3,
+      labels = names(get_levels_ih("uo_daily")[1:3])
+    )
+  )
+
+# ## Look at missingness of variables required to calculate SOFA
+# library(naniar)
+# sofa_df_sub <- subset(sofa_df, select = -c(id, redcap_event_name))
+# 
+# vis_miss(
+#   subset(sofa_df_sub, abcde_icu == 1, select = -abcde_icu) %>%
+#     arrange(days_since_consent)
+# ) + ggtitle("ICU Days Only")
+# 
+# vis_miss(
+#   subset(sofa_df_sub, abcde_icu == 0, select = -abcde_icu) %>%
+#     arrange(days_since_consent)
+# ) + ggtitle("Non-ICU Days Only")
+# 
+# vis_miss(
+#   subset(sofa_df_sub, is.na(abcde_icu), select = -abcde_icu) %>%
+#     arrange(days_since_consent)
+# ) + ggtitle("No ABCDE Form (Missing ICU Day Question)")
+
+## Calculate *raw* SOFA component scores (no imputation)
+sofa_df <- sofa_df %>%
+  ## SOFA component scores
+  mutate(
+    ## Respiratory component: Use P/F if available; otherwise use S/F
+    resp_sofa_raw = case_when(
+      is.na(pfratio_daily) & is.na(sf_daily) ~ as.numeric(NA),
+      pfratio_daily <= 100  ~ 4,
+      pfratio_daily <= 200  ~ 3,
+      pfratio_daily <= 300  ~ 2,
+      pfratio_daily <= 400  ~ 1,
+      !is.na(pfratio_daily) ~ 0,
+      sf_daily <= 89        ~ 4,
+      sf_daily <= 214       ~ 3,
+      sf_daily <= 357       ~ 2,
+      sf_daily <= 512       ~ 1,
+      TRUE                  ~ 0
+    ),
+
+    ## Coagulation
+    coag_sofa_raw = case_when(
+      is.na(plt_daily) ~ as.numeric(NA),
+      plt_daily <= 20  ~ 4,
+      plt_daily <= 50  ~ 3,
+      plt_daily <= 100 ~ 2,
+      plt_daily <= 150 ~ 1,
+      TRUE             ~ 0
+    ),
+
+    ## Liver
+    liver_sofa_raw = case_when(
+      is.na(bili_daily) ~ as.numeric(NA),
+      bili_daily >= 12  ~ 4,
+      bili_daily >= 6   ~ 3,
+      bili_daily >= 2   ~ 2,
+      bili_daily >= 1.2 ~ 1,
+      TRUE              ~ 0
+    ),
+
+    ## Central nervous system: Use GCS if available; otherwise, use RASS
+    cns_sofa_raw = case_when(
+      is.na(gcs_daily) & is.na(rass_daily_low) ~ as.numeric(NA),
+      !is.na(gcs_daily) & gcs_daily < 6        ~ 4,
+      !is.na(gcs_daily) & gcs_daily < 10       ~ 3,
+      !is.na(gcs_daily) & gcs_daily < 13       ~ 2,
+      !is.na(gcs_daily) & gcs_daily < 15       ~ 1,
+      rass_daily_low <= -4                     ~ 4,
+      rass_daily_low == -3                     ~ 3,
+      rass_daily_low == -2                     ~ 2,
+      rass_daily_low == -1                     ~ 1,
+      TRUE                                     ~ 0
+    ),
+
+    ## Renal: Look at highest creatinine *and* urine output
+    renal_sofa_raw = case_when(
+      is.na(cr_daily) ~ as.numeric(NA),
+      cr_daily >= 5   | (!is.na(uo_daily) & uo_daily == "0-200")   ~ 4,
+      cr_daily >= 3.5 | (!is.na(uo_daily) & uo_daily == "201-500") ~ 3,
+      cr_daily >= 2                                                ~ 2,
+      cr_daily >= 1.2                                              ~ 1,
+      TRUE                                                         ~ 0
+    ),
+
+    ## CV: already in database; create new variable to match naming convention
+    cv_sofa_raw = as.numeric(cv_sofa_daily)
+  )
+
+## For missing components, find closest available component score within +/-2
+## days to impute. If length of time is the same (eg, missing day has a value
+## the day before and after), prioritize the earlier one.
+sofa_df2 <- sofa_df %>%
+  group_by(id) %>%
+  mutate_at(
+    vars(ends_with("_sofa_raw")), funs(imp = impute_closest(.))
+  ) %>%
+  ungroup() %>%
+  rename_at(
+    vars(ends_with("_raw_imp")), funs(str_replace(., "\\_raw", ""))
+  )
+
+  
+
+## Look at missingness of SOFA components
+library(naniar)
+sofa_comp_df <-
+  sofa_df2[, grep("(abcde\\_icu|days\\_since\\_consent|\\_sofa\\_raw|\\_sofa\\_imp)$",
+                 names(sofa_df2))]
+
+vis_miss(
+  sofa_comp_df %>%
+    filter(abcde_icu == 1) %>%
+    select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
+           cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
+           liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
+) + ggtitle("ICU Days Only")
+
+vis_miss(
+  sofa_comp_df %>%
+    filter(abcde_icu == 0) %>%
+    select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
+           cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
+           liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
+) + ggtitle("Non-ICU Days Only")
+
+vis_miss(
+  sofa_comp_df %>%
+    filter(is.na(abcde_icu)) %>%
+    select(resp_sofa_raw, resp_sofa_imp, coag_sofa_raw, coag_sofa_imp,
+           cns_sofa_raw, cns_sofa_imp, cv_sofa_raw, cv_sofa_imp,
+           liver_sofa_raw, liver_sofa_imp, renal_sofa_raw, renal_sofa_imp)
+) + ggtitle("No ABCDE Form (Missing ICU Day Question)")
+
+
+# ## Sum components to get versions of SOFA
+# ## Vectors of SOFA variable prefixes
+# sofa_mod_prefixes <- c("resp", "coag", "liver", "renal", "cv")
+# sofa_all_prefixes <- c(sofa_mod_prefixes, "cns")
+# 
+# ## Vectors of SOFA variable names
+# sofa_mod_vars_adm <- paste0(sofa_mod_prefixes, "_sofa_adm")
+# sofa_mod_vars <- paste0(sofa_mod_prefixes, "_sofa")
+# sofa_all_vars_adm <- paste0(sofa_all_prefixes, "_sofa_adm")
+# sofa_all_vars <- paste0(sofa_all_prefixes, "_sofa")
+# 
+# ## How many components are available?
+# baseline$sofa_vars <- rowSums(!is.na(baseline[, sofa_all_vars]))
+# baseline$sofa_vars_adm <- rowSums(!is.na(baseline[, sofa_all_vars_adm]))
+# baseline$sofa_mod_vars <- rowSums(!is.na(baseline[, sofa_mod_vars]))
+# baseline$sofa_mod_vars_adm <- rowSums(!is.na(baseline[, sofa_mod_vars_adm]))
+# 
+# ## Calculate totals; using na.rm = TRUE means that components still missing
+# ## after looking ahead will be considered normal
+# 
+# ## Overall SOFA, using day of admission + days and day of admission only
+# baseline$sofa_adm <- ifelse(
+#   baseline$sofa_vars == 0, NA,
+#   rowSums(baseline[, sofa_all_vars], na.rm = TRUE)
+# )
+# baseline$sofa_adm_only <- ifelse(
+#   baseline$sofa_vars_adm == 0, NA,
+#   rowSums(baseline[, sofa_all_vars_adm])
+# )
+# 
+# ## Modified SOFA (no CNS component)
+# baseline$sofa_mod_adm <- ifelse(
+#   baseline$sofa_mod_vars == 0, NA,
+#   rowSums(baseline[, sofa_mod_vars], na.rm = TRUE)
+# )
+# baseline$sofa_mod_adm_only <- ifelse(
+#   baseline$sofa_mod_vars_adm == 0, NA,
+#   rowSums(baseline[, sofa_mod_vars_adm])
+# )
+# 
+# 
+# 
+# 
