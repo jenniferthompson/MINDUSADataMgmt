@@ -229,3 +229,47 @@ first_notna <- function(x){
 days_diff <- function(t2, t1, ...){
   as.numeric(difftime(t2, t1, units = "days", ...))
 }
+
+## For a missing value, impute closest non-missing value within nrecs records
+## NOTE: This function assumes the data includes one record per time point where
+##   the value should exist.
+impute_closest <- function(
+  x,                  ## vector with potentially  missing values
+  nrecs = 2,          ## max distance between NA, present values
+  prefer_past = TRUE  ## if past/future values equidistant, prefer past or future?
+){
+  
+  ## Indices for missing, non-missing values
+  nas <- is.na(x)
+  a <- which(!nas)
+  b <- which(nas)
+  
+  ## Vectors with indices for last non-missing value before/after NAs
+  ## Include -Inf, Inf to account for leading/trailing NAs
+  prior <- vapply(b, function(i) tail(c(-Inf, a[a < i]), 1), numeric(1))
+  post <- vapply(b, function(i) head(c(a[a > i], Inf), 1), numeric(1))
+  
+  ## Calculate distance between missing value and closest prior/post value
+  prior_dist <- abs(b - prior)
+  post_dist <- abs(b - post)
+  
+  ## If distance is greater than max allowable distance, set to Inf
+  prior_dist[prior_dist > nrecs] <- Inf
+  post_dist[post_dist > nrecs] <- Inf
+  
+  ## For each missing value, decide whether to use prior or post value
+  if(prefer_past) {
+    use_prior <- prior_dist <= post_dist
+  } else {
+    use_prior <- prior_dist < post_dist
+  }
+  
+  ## If distance to both prior and post value is Inf, keep as NA
+  use_prior[is.infinite(prior_dist) & is.infinite(post_dist)] <- NA
+  
+  ## x at each missing value gets x at appointed prior/post value
+  x[b] <- x[ifelse(use_prior, prior, post)]
+  
+  ## Return final value
+  x
+}
