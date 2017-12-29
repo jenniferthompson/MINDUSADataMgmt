@@ -207,14 +207,14 @@ make_factor_ih <- function(df, varname){
 }
 
 ## -- Helper functions ---------------------------------------------------------
-max_na <- function(x){ max(x, na.rm = TRUE) }
-min_na <- function(x){ min(x, na.rm = TRUE) }
-sum_na <- function(x){ sum(x, na.rm = TRUE) }
-mean_na <- function(x){ mean(x, na.rm = TRUE) }
-sd_na <- function(x){ sd(x, na.rm = TRUE) }
-q25 <- function(x){ quantile(x, probs = 0.25, na.rm = TRUE) }
-q50 <- function(x){ quantile(x, probs = 0.50, na.rm = TRUE) }
-q75 <- function(x){ quantile(x, probs = 0.75, na.rm = TRUE) }
+max_na <- function(x){ ifelse(all(is.na(x)), NA, max(x, na.rm = TRUE)) }
+min_na <- function(x){ ifelse(all(is.na(x)), NA, min(x, na.rm = TRUE)) }
+sum_na <- function(x){ ifelse(all(is.na(x)), NA, sum(x, na.rm = TRUE)) }
+mean_na <- function(x){ ifelse(all(is.na(x)), NA, mean(x, na.rm = TRUE)) }
+sd_na <- function(x){ ifelse(all(is.na(x)), NA, sd(x, na.rm = TRUE)) }
+q25 <- function(x){ ifelse(all(is.na(x)), NA, quantile(x, probs = 0.25, na.rm = TRUE)) }
+q50 <- function(x){ ifelse(all(is.na(x)), NA, quantile(x, probs = 0.50, na.rm = TRUE)) }
+q75 <- function(x){ ifelse(all(is.na(x)), NA, quantile(x, probs = 0.75, na.rm = TRUE)) }
 
 ##  If all values NA, return NA; otherwise, return first non-missing value
 first_notna <- function(x){
