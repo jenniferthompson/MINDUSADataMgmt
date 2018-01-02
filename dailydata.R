@@ -227,7 +227,8 @@ calc_med_vars <- function(
     group_by(id) %>%
     summarise_at(
       vars(starts_with("daily_")),
-      funs(days_all = sum_na(. > 0),     ## number of days received drug
+      funs(ever = (sum_na(. > 0) > 0),   ## ever received drug during period
+           days_all = sum_na(. > 0),     ## number of days received drug
            prop_days = mean_na(. > 0),   ## proportion of days received drug
            mean_all = mean_na(.),        ## total dose / days in hospital
            mean_exp = mean_na(.[. > 0]), ## mean dose on days *received* drug
