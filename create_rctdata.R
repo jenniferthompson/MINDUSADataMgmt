@@ -17,6 +17,8 @@ doses_df <- readRDS("analysisdata/rds/doses.rds")
 padasmts_df <- readRDS("analysisdata/rds/padasmts.rds")
 paddaily_df <- readRDS("analysisdata/rds/paddaily.rds")
 padsummary_df <- readRDS("analysisdata/rds/padsummary.rds")
+dailydata_df <- readRDS("analysisdata/rds/dailydata.rds")
+dailysummary_df <- readRDS("analysisdata/rds/dailysummary.rds")
 
 ## -- Temporary: Create dataset of fake treatment groups -----------------------
 ## Final treatment groups will be added once data clean is finalized, database
@@ -37,4 +39,5 @@ trt_df <- data.frame(
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
 save(trt_df, ptstatus_df, allptevents_df, randptevents_df, admission_df,
      datestrack_df, ptdrug_df, doses_df, padasmts_df, paddaily_df, padsummary_df,
+     dailydata_df, dailysummary_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")
