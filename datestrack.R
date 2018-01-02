@@ -315,7 +315,11 @@ mv_firstsucc <- mv_dates %>%
   filter(mv_dc_success) %>%
   group_by(id) %>%
   summarise(first_succ_mvdc = min_na(mv_stop_final)) %>%
-  ungroup()
+  ungroup() %>%
+  mutate(
+    first_succ_mvdc =
+      as.POSIXct(first_succ_mvdc, origin = "1970-1-1 00:00", tz = "UTC")
+  )
 
 ## Combine patient MV info
 mv_summary <- reduce(
