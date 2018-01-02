@@ -335,13 +335,16 @@ mv_summary <- reduce(
   mutate(
     ## Indicator for whether patient was ever on MV during hospitalization
     ever_mv = !is.na(days_mv_exp),
+    ## Indicators for whether patient was on MV at, within 24h of randomization
+    on_mv_atrand = ifelse(is.na(on_mv_atrand), FALSE, on_mv_atrand),
+    on_mv_rand24 = ifelse(is.na(on_mv_rand24), FALSE, on_mv_rand24),
     ## Total time on vent for all patients (assign 0 if never on MV)
     days_mv_all = ifelse(is.na(days_mv_exp), 0, days_mv_exp),
     ## Days to MV liberation from randomization; should be NA if patients not
     ## on MV at/within 24h after randomization
-    daysto_mvlib_exp = ifelse(is.na(on_mv_atrand) | !on_mv_atrand, NA,
+    daysto_mvlib_exp = ifelse(is.na(on_mv_rand24) | !on_mv_rand24, NA,
                               days_diff(first_succ_mvdc, randomization_time)),
-    daysto_mvlib_all = ifelse(is.na(on_mv_atrand) | !on_mv_atrand, NA,
+    daysto_mvlib_all = ifelse(is.na(on_mv_rand24) | !on_mv_rand24, NA,
                        ifelse(!is.na(daysto_mvlib_exp), daysto_mvlib_exp,
                               days_diff(last_inhosp_time, randomization_time)))
   ) %>%
