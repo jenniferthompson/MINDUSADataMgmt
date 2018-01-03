@@ -301,7 +301,7 @@ pad_summary <- pad_int %>%
     n_coma_avail = sum(!is.na(comatose)),
     n_mental_avail = sum(!is.na(mental_status)),
     n_dcfree_avail = sum(!is.na(dcfree)),
-    n_missing_dcfree = sum(is.na(dcfree)),
+    n_dcfree_unavail = sum(is.na(dcfree)),
     
     ## Among all patients
     coma_int_all = ifelse(n_coma_avail == 0, NA, sum_na(comatose)),
@@ -321,16 +321,17 @@ pad_summary <- pad_int %>%
     delcoma_int_exp =
       ifelse(is.na(delcoma_int_all) | delcoma_int_all == 0, NA, delcoma_int_all),
     
-    ## Current calculation: Assume all days with missing info are NORMAL
-    dcfd_int_all = ifelse(
-      n_dcfree_avail == 0, NA,
-      sum(is.na(dcfree)) + sum_na(dcfree)
-    )
+    ## Calculate two ways:
+    ## - Assume all missing days are BAD (conservative approach)
+    ## - Assume all missing days are NORMAL (anticonservative approach)
+    dcfd_int_nabad = ifelse(n_dcfree_avail == 0, NA, sum_na(dcfree)),
+    dcfd_int_nagood =
+      ifelse(n_dcfree_avail == 0, NA, sum_na(dcfree) + n_dcfree_unavail)
   ) %>%
   select(id, n_coma_avail, ever_coma_int, coma_int_all, coma_int_exp,
          n_mental_avail, ever_del_int, del_int_all, del_int_exp,
          ever_delcoma_int, delcoma_int_all, delcoma_int_exp,
-         n_dcfree_avail, dcfd_int_all) %>%
+         n_dcfree_avail, dcfd_int_nabad, dcfd_int_nagood) %>%
   ## Add RASS closest to randomization
   left_join(rand_asmts, by = "id")
 
