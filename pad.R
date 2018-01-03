@@ -34,7 +34,7 @@ rand_pts <- ptstatus_df %>%
   filter(randomized & !excluded_ever) %>%
   pull(id)
 
-## -- Download variables from dates tracking form ------------------------------
+## -- Download variables from daily PAD form -----------------------------------
 pad_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
   id_field = "id",
@@ -48,6 +48,29 @@ pad_raw <- import_df(
 ) %>%
   ## Remove unneeded variables
   select(-daily_pain_agitation_delirium_pad_assessment_complete)
+
+## -- Download time of CAM+ that qualified patient for randomization -----------
+## Also get date/time of randomization
+randdate_df <- import_df(
+  rctoken = "MINDUSA_IH_TOKEN",
+  id_field = "id",
+  fields = c("id", "randomization_time"),
+  events = "enrollment__day_0_arm_1"
+) %>%
+  filter(id %in% rand_pts) %>%
+  select(-redcap_event_name) %>%
+  mutate(randomization_time = ymd_hm(randomization_time))
+
+randcam_df <- import_df(
+  rctoken = "MINDUSA_IH_TOKEN",
+  id_field = "id",
+  export_labels = "none",
+  fields = c("id", "first_cam_time"),
+  events = "randomization_arm_1"
+) %>%
+  filter(id %in% rand_pts) %>%
+  mutate(first_cam_time = ymd_hm(first_cam_time)) %>%
+  select(-redcap_event_name)
 
 ## -- Data management with raw assessments -------------------------------------
 ## All "reasons not done" use the same levels; set these ahead of time
@@ -206,6 +229,49 @@ pad_daily <- pad_long %>%
     )
   )
 
+## -- Figure out RASS level at the time of randomization -----------------------
+## Tried matching by exact time of PAD assessment, but >100 patients had no RASS
+## available by that means. New tactic: First available assessment within 2hr
+## before/after randomization.
+
+## Get all PAD assessments within X hours before/after time of randomization
+within_hrs_rand <- 24
+
+rand_asmts <- pad_long %>%
+  left_join(randdate_df, by = "id") %>%
+  ## Calculate hours between randomization and PAD assessment
+  mutate(hrs_btwn_random = abs(
+    as.numeric(difftime(randomization_time, assess_time, units = "hours"))
+  )) %>%
+  ## We want only non-missing RASSes within X hours of randomization
+  filter(!is.na(rass) & hrs_btwn_random <= within_hrs_rand) %>%
+  ## Take non-missing RASS closest to randomization time per pt (before/after)
+  arrange(id, hrs_btwn_random) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  rename(rass_randomization = "rass") %>%
+  select(id, rass_randomization)
+
+## length(setdiff(rand_pts, unique(rand_asmts$id)))
+## Tried 2 hours; 34 patients missing
+## 3 hours: 8 patients missing
+## 4 hours: 3 patients missing
+## 5, 6 hours: 2 patients missing
+## 7, 8 hours: 1 patient missing
+## VAN-288 had no RASS on the day of randomization
+
+# ## Write CSV of patients whose "first CAM+" is not on the date of randomization
+# ## Note: doesn't work with current code, sorry
+# write_csv(
+#   subset(
+#     randcam_df,
+#     first_cam_date != randomization_date,
+#     select = c(id, first_cam_time, randomization_time)
+#   ),
+#   path = "campos_notat_randomization.csv"
+# )
+
 ## -- Mental status variables during 14 days including+after randomization -----
 ## Currently assumes no imputation; any hospital day that is missing or patient
 ##   is withdrawn is essentially assumed to be normal
@@ -264,7 +330,9 @@ pad_summary <- pad_int %>%
   select(id, n_coma_avail, ever_coma_int, coma_int_all, coma_int_exp,
          n_mental_avail, ever_del_int, del_int_all, del_int_exp,
          ever_delcoma_int, delcoma_int_all, delcoma_int_exp,
-         n_dcfree_avail, dcfd_int_all)
+         n_dcfree_avail, dcfd_int_all) %>%
+  ## Add RASS closest to randomization
+  left_join(rand_asmts, by = "id")
 
 ## -- Write datasets to analysisdata -------------------------------------------
 ## 1. All assessments
