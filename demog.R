@@ -17,11 +17,8 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
-## -- Download variables from prehospital, enrollment data collection forms ----
-
-## From enrollment qualification form: All variables
-## From prehospital form: Only IQCODE (patient should be excluded if >= 4.5)
-iqcode_vars <- sprintf("iqcode_%s_ph", 1:16)
+## -- Download variables from necessary forms ----------------------------------
+## Enrollment qualification, prehospital, randomization qualification
 
 demog_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
