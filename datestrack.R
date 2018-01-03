@@ -338,6 +338,8 @@ mv_summary <- reduce(
     ## Indicators for whether patient was on MV at, within 24h of randomization
     on_mv_atrand = ifelse(is.na(on_mv_atrand), FALSE, on_mv_atrand),
     on_mv_rand24 = ifelse(is.na(on_mv_rand24), FALSE, on_mv_rand24),
+    ## Ind: ever liberated from MV *among pts on it w/in 24h of randomization*
+    ever_mvlib_rand24 = ifelse(!on_mv_rand24, NA, ever_mvlib),
     ## Total time on vent for all patients (assign 0 if never on MV)
     days_mv_all = ifelse(is.na(days_mv_exp), 0, days_mv_exp),
     ## Days to MV liberation from randomization; should be NA if patients not
@@ -469,8 +471,9 @@ datestrack_df <- reduce(
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
   ## discharge, withdrawal, death info
   select(id, coenroll_sails:mv_num, ever_mv, days_mv_all, days_mv_exp,
-         on_mv_atrand, on_mv_rand24, ever_mvlib, daysto_mvlib_exp,
-         daysto_mvlib_all, icu_readmit_number, icu_los, hosp_los,
+         on_mv_atrand, on_mv_rand24, ever_mvlib, ever_mvlib_rand24,
+         daysto_mvlib_exp, daysto_mvlib_all,
+         icu_readmit_number, icu_los, hosp_los,
          hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
          studywd, daysto_wd, studywd_ih, daysto_wd_ih,
          studywd_person:studywd_writing_other,
