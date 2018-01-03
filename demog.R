@@ -973,12 +973,7 @@ adm_df <- left_join(
          apache_aps_adm, apache_aps_adm_only, sofa_adm, sofa_adm_only,
          sofa_mod_adm, sofa_mod_adm_only, cv_sofa_adm_f),
   ph_form,
-  by = "id") %>%
-  select(id, age_consent, gender, race_cat, ethnicity, english_level, education,
-         insurance, height, weight, bmi, home_antipsyc, charlson_total, frailty,
-         frailty_f, icu_rsn, icu_rsn_other, apache_adm, apache_adm_only,
-         apache_aps_adm, apache_aps_adm_only, sofa_adm, sofa_adm_only,
-         sofa_mod_adm, sofa_mod_adm_only, cv_sofa_adm_f)
+  by = "id")
 
 saveRDS(adm_df, file = "analysisdata/rds/admission.rds")
 write_csv(adm_df, path = "analysisdata/csv/admission.csv")
