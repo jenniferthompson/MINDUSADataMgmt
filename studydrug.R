@@ -17,6 +17,17 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
+## -- Download randomization info ----------------------------------------------
+random_raw <- import_df(
+  rctoken = "MINDUSA_IH_TOKEN",
+  id_field = "id",
+  fields = c("id", "randomized_yn", "randomization_time"),
+  events = "enrollment__day_0_arm_1"
+) %>%
+  filter(randomized_yn == "Yes") %>%
+  mutate(randomization_time = ymd_hm(randomization_time)) %>%
+  select(id, randomization_time)
+
 ## -- Download data needed to determine whether patient ever got study drug ----
 drug_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
@@ -27,6 +38,8 @@ drug_raw <- import_df(
     paste0("study_drug_given_", c(1:2, "3a")),
     paste0("dose_given_yes_", 1:3),
     "dose_y_other", "dose_y_other2", "dose_y_other3",
+    ## Dates/times have unfortunate likely copy/paste errors
+    "dose_datetime_1", "dose_datetime_12_16f", "dose_datetime_12_17f",
     paste0("dose_", 1:3),
     paste0("pre_dose_qtc_", 1:3),
     paste0("ecg_ordered_", 1:3),
@@ -42,7 +55,12 @@ drug_raw <- import_df(
 ) %>%
   ## Study drug could not be given on "randomziation" or "prior to d/c" events
   filter(!(redcap_event_name %in%
-             c("randomization_arm_1", "prior_to_hospital_arm_1")))
+             c("randomization_arm_1", "prior_to_hospital_arm_1"))) %>%
+  ## Rename dose date/time variables
+  rename(
+    dose_datetime_2 = "dose_datetime_12_16f",
+    dose_datetime_3 = "dose_datetime_12_17f"
+  )
 
 ## -- assertr checks for raw data ----------------------------------------------
 drug_raw_checks <- drug_raw %>%
@@ -86,6 +104,7 @@ doses_df <- drug_raw %>%
       levels = get_levels_ih("study_drug_given_1"),
       labels = names(get_levels_ih("study_drug_given_1"))
     ),
+    dose_dttm = ymd_hm(dose_datetime),
     dose_amt = factor(
       dose_amt,
       levels = get_levels_ih("dose_1"),
@@ -186,8 +205,8 @@ doses_df <- drug_raw %>%
   select(
     id, redcap_event_name, dose_num, drug_given,
     ## Dose, QTc/ECG info
-    dose_amt, dose_type, dose_type_other, pre_dose_qtc, ecg_ordered, ecg_result,
-    post_dose_qtc,
+    dose_dttm, dose_amt, dose_type, dose_type_other,
+    pre_dose_qtc, ecg_ordered, ecg_result, post_dose_qtc,
     ## Hold info
     drug_held, dose_held_reason, matches("^held\\_[a-z]+$"), held_other_exp,
     oversed_actual,
@@ -268,10 +287,36 @@ first_dc <- doses_df %>%
   ungroup %>%
   select(id, dose_permdc_reason:permdc_other_exp)
 
+## Find time of first dose actually received for each patient;
+##  calculate time between randomization and first study drug
+first_dose <- doses_df %>%
+  filter(drug_given) %>%
+  select(id, dose_dttm) %>%
+  arrange(id, dose_dttm) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup %>%
+  right_join(random_raw, by = "id") %>%
+  mutate(
+    hrs_random_drug =
+      as.numeric(difftime(dose_dttm, randomization_time, unit = "hours"))
+  ) %>%
+  select(id, hrs_random_drug)
+
+# ## Some have negative hours between randomization and first study drug;
+# ##  write to CSV for checking
+# write_csv(
+#   subset(first_dose,
+#          hrs_random_drug < 0,
+#          select = c(id, randomization_time, dose_dttm, hrs_random_drug)),
+#   path = "drug_before_randomization.csv"
+# )
+
 ## Combine days, doses, and discontinuation information; one record per patient
-ptdrug_df <- ptdays_df %>%
-  left_join(ptdoses_df, by = "id") %>%
-  left_join(first_dc, by = "id") %>%
+ptdrug_df <- reduce(
+  list(ptdays_df, ptdoses_df, first_dc, first_dose),
+  left_join, by = "id"
+) %>%
   mutate_at(
     vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
