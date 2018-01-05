@@ -564,16 +564,31 @@ sofa_icu <- calc_sofa_vars(sofa_df %>% filter(in_icu), "icu")
 sofa_int_icu <-
   calc_sofa_vars(sofa_df %>% filter(intervention & in_icu), "int_icu")
 
-## Join all medication summary variables into a single, gigantic dataset
+## Join all SOFA summary variables into a single, gigantic dataset
 sofa_summary <- reduce(
   list(sofa_ih, sofa_pr, sofa_int, sofa_icu, sofa_int_icu),
   left_join,
   by = "id"
 )
 
+## -- Find SOFA on the date of randomization, add to summary dataset -----------
+sofa_rand_df <- sofa_df %>%
+  right_join(
+    randpts_events %>%
+      filter(study_day == 0) %>%
+      dplyr::select(id, redcap_event_name),
+    by = c("id", "redcap_event_name")
+  ) %>%
+  dplyr::select(id, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp) %>%
+  rename_at(
+    vars(-id),
+    funs(paste0(., "_rand"))
+  )
+
 ## -- Combine daily, summary information into single datasets ------------------
 daily_df <- reduce(
   list(
+    subset(allpts_events, select = c(id, redcap_event_name)),
     med_df %>% select(-(days_since_consent:postint)),
     sofa_df %>% select(-abcde_icu, -(prerandom:in_icu))
   ),
@@ -582,7 +597,9 @@ daily_df <- reduce(
 
 dailysum_df <- reduce(
   list(
+    data.frame(id = rand_pts),
     med_summary,
+    sofa_rand_df,
     sofa_summary
   ),
   left_join, by = c("id")
