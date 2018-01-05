@@ -250,8 +250,8 @@ rand_asmts <- pad_long %>%
   group_by(id) %>%
   slice(1) %>%
   ungroup() %>%
-  rename(rass_randomization = "rass") %>%
-  select(id, rass_randomization)
+  rename(rass_rand = "rass") %>%
+  select(id, rass_rand)
 
 # ## Write CSV of patients whose "first CAM+" is not on the date of randomization
 # ## Note: doesn't work with current code, sorry
