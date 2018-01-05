@@ -243,8 +243,8 @@ rand_asmts <- pad_long %>%
   mutate(hrs_btwn_random = abs(
     as.numeric(difftime(randomization_time, assess_time, units = "hours"))
   )) %>%
-  ## We want only non-missing RASSes within X hours of randomization
-  filter(!is.na(rass) & hrs_btwn_random <= within_hrs_rand) %>%
+  ## We want non-missing, non-comatose RASSes on calendar date of randomization
+  filter(!is.na(rass) & rass >= -3 & date(randomization_time) == assess_date) %>%
   ## Take non-missing RASS closest to randomization time per pt (before/after)
   arrange(id, hrs_btwn_random) %>%
   group_by(id) %>%
@@ -252,14 +252,6 @@ rand_asmts <- pad_long %>%
   ungroup() %>%
   rename(rass_randomization = "rass") %>%
   select(id, rass_randomization)
-
-## length(setdiff(rand_pts, unique(rand_asmts$id)))
-## Tried 2 hours; 34 patients missing
-## 3 hours: 8 patients missing
-## 4 hours: 3 patients missing
-## 5, 6 hours: 2 patients missing
-## 7, 8 hours: 1 patient missing
-## VAN-288 had no RASS on the day of randomization
 
 # ## Write CSV of patients whose "first CAM+" is not on the date of randomization
 # ## Note: doesn't work with current code, sorry
@@ -293,27 +285,27 @@ pad_int <- pad_daily %>%
   )
 
 ## Summarize mental status variables for each patient
-pad_summary <- pad_int %>%
+pad_summary_int <- pad_int %>%
   group_by(id) %>%
   summarise(
     ## Because RASS was sometimes available when CAM was not, we can determine
     ##  coma status more frequently than we can determine delirium/overall
-    n_coma_avail = sum(!is.na(comatose)),
-    n_mental_avail = sum(!is.na(mental_status)),
-    n_dcfree_avail = sum(!is.na(dcfree)),
-    n_dcfree_unavail = sum(is.na(dcfree)),
+    n_coma_avail_int = sum(!is.na(comatose)),
+    n_mental_avail_int = sum(!is.na(mental_status)),
+    n_dcfree_avail_int = sum(!is.na(dcfree)),
+    n_dcfree_unavail_int = sum(is.na(dcfree)),
     
     ## Among all patients
-    coma_int_all = ifelse(n_coma_avail == 0, NA, sum_na(comatose)),
+    coma_int_all = ifelse(n_coma_avail_int == 0, NA, sum_na(comatose)),
     ever_coma_int = ifelse(is.na(coma_int_all), NA, coma_int_all > 0),
-    del_int_all = ifelse(n_mental_avail == 0, NA, sum_na(delirious)),
+    del_int_all = ifelse(n_mental_avail_int == 0, NA, sum_na(delirious)),
     ever_del_int = ifelse(is.na(del_int_all), NA, del_int_all > 0),
-    delcoma_int_all = ifelse(n_mental_avail == 0, NA, sum_na(braindys)),
+    delcoma_int_all = ifelse(n_mental_avail_int == 0, NA, sum_na(braindys)),
     ever_delcoma_int = ifelse(is.na(delcoma_int_all), NA, delcoma_int_all > 0),
     
     ## Among patients who ever experienced coma/delirium
-    ## Delirium and delirium/coma *should* be the same; as of Dec 2017, we know
-    ##  that one patient has a difference in delirium (0 delirium days)
+    ## Delirium and delirium/coma *should* be available the same number of days;
+    ##  as of Dec 2017, we know one pt has a diff in delirium (0 delirium days)
     coma_int_exp =
       ifelse(is.na(coma_int_all) | coma_int_all == 0, NA, coma_int_all),
     del_int_exp =
@@ -324,16 +316,50 @@ pad_summary <- pad_int %>%
     ## Calculate two ways:
     ## - Assume all missing days are BAD (conservative approach)
     ## - Assume all missing days are NORMAL (anticonservative approach)
-    dcfd_int_nabad = ifelse(n_dcfree_avail == 0, NA, sum_na(dcfree)),
+    dcfd_int_nabad = ifelse(n_dcfree_avail_int == 0, NA, sum_na(dcfree)),
     dcfd_int_nagood =
-      ifelse(n_dcfree_avail == 0, NA, sum_na(dcfree) + n_dcfree_unavail)
+      ifelse(n_dcfree_avail_int == 0, NA, sum_na(dcfree) + n_dcfree_unavail_int)
   ) %>%
-  select(id, n_coma_avail, ever_coma_int, coma_int_all, coma_int_exp,
-         n_mental_avail, ever_del_int, del_int_all, del_int_exp,
+  select(id, n_coma_avail_int, ever_coma_int, coma_int_all, coma_int_exp,
+         n_mental_avail_int, ever_del_int, del_int_all, del_int_exp,
          ever_delcoma_int, delcoma_int_all, delcoma_int_exp,
-         n_dcfree_avail, dcfd_int_nabad, dcfd_int_nagood) %>%
-  ## Add RASS closest to randomization
-  left_join(rand_asmts, by = "id")
+         n_dcfree_avail_int, dcfd_int_nabad, dcfd_int_nagood)
+
+## -- Mental status variables during entire hospitalization --------------------
+## Does *not* calculate DCFDs, since we need a stable denominator for that
+## Currently assumes no imputation; any hospital day that is missing or patient
+##   is withdrawn is essentially assumed to be normal
+
+## Summarize mental status variables for each patient
+pad_summary_ih <- pad_daily %>%
+  group_by(id) %>%
+  summarise(
+    ## Because RASS was sometimes available when CAM was not, we can determine
+    ##  coma status more frequently than we can determine delirium/overall
+    n_coma_avail_ih = sum(!is.na(comatose)),
+    n_mental_avail_ih = sum(!is.na(mental_status)),
+
+    ## Among all patients
+    coma_ih_all = ifelse(n_coma_avail_ih == 0, NA, sum_na(comatose)),
+    ever_coma_ih = ifelse(is.na(coma_ih_all), NA, coma_ih_all > 0),
+    del_ih_all = ifelse(n_mental_avail_ih == 0, NA, sum_na(delirious)),
+    ever_del_ih = ifelse(is.na(del_ih_all), NA, del_ih_all > 0),
+    delcoma_ih_all = ifelse(n_mental_avail_ih == 0, NA, sum_na(braindys)),
+    ever_delcoma_ih = ifelse(is.na(delcoma_ih_all), NA, delcoma_ih_all > 0),
+    
+    ## Among patients who ever experienced coma/delirium
+    ## Delirium and delirium/coma *should* be the same; as of Dec 2017, we know
+    ##  that one patient has a difference in delirium (0 delirium days)
+    coma_ih_exp =
+      ifelse(is.na(coma_ih_all) | coma_ih_all == 0, NA, coma_ih_all),
+    del_ih_exp =
+      ifelse(is.na(del_ih_all) | del_ih_all == 0, NA, del_ih_all),
+    delcoma_ih_exp =
+      ifelse(is.na(delcoma_ih_all) | delcoma_ih_all == 0, NA, delcoma_ih_all)
+  ) %>%
+  select(id, n_coma_avail_ih, ever_coma_ih, coma_ih_all, coma_ih_exp,
+         n_mental_avail_ih, ever_del_ih, del_ih_all, del_ih_exp,
+         ever_delcoma_ih, delcoma_ih_all, delcoma_ih_exp)
 
 ## -- Write datasets to analysisdata -------------------------------------------
 ## 1. All assessments
@@ -347,6 +373,11 @@ saveRDS(pad_daily, file = "analysisdata/rds/paddaily.rds")
 write_csv(pad_daily, path = "analysisdata/csv/paddaily.csv")
 
 ## 3. Summary variables
+pad_summary <- reduce(
+  list(rand_asmts, pad_summary_int, pad_summary_ih),
+  left_join, by = "id"
+)
+
 saveRDS(pad_summary, file = "analysisdata/rds/padsummary.rds")
 write_csv(pad_summary, path = "analysisdata/csv/padsummary.csv")
 
@@ -357,7 +388,7 @@ dcfd_avail <- pad_summary %>%
   left_join(ptstatus_df %>% select(id, wd_inhosp)) %>%
   mutate(
     all_dcfd_avail = factor(
-      as.numeric(n_dcfree_avail == 14),
+      as.numeric(n_dcfree_avail_int == 14),
       levels = 0:1, labels = c("Missing >=1 day", "All days available")
     ),
     wd_inhosp = factor(
@@ -367,7 +398,7 @@ dcfd_avail <- pad_summary %>%
     )
   )
 
-ggplot(data = dcfd_avail, aes(x = n_dcfree_avail)) +
+ggplot(data = dcfd_avail, aes(x = n_dcfree_avail_int)) +
   facet_wrap(~ wd_inhosp) +
   geom_histogram(aes(fill = all_dcfd_avail), binwidth = 1) +
   scale_fill_viridis_d(name = "Missing anything?", end = 0.75) +
