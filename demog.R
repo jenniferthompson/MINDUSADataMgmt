@@ -25,7 +25,9 @@ demog_raw <- import_df(
   id_field = "id",
   export_labels = "none",
   forms = c("enrollment_data_collection_form", "prehospital_form"),
-  fields = c("id", "enroll_time", "icuadm_1_time", "organ_failures_present"),
+  fields = c(
+    "id", "study_site", "enroll_time", "icuadm_1_time", "organ_failures_present"
+  ),
   events = "enrollment__day_0_arm_1"
 ) %>%
   ## Remove unneeded variables, REDCap calculated fields
@@ -202,6 +204,7 @@ baseline <- demog_raw %>%
 ## -- Straightforward new variables --------------------------------------------
 baseline <- baseline %>%
   mutate(
+    study_site = make_factor_ih(., "study_site"),
     age_consent = as.numeric(difftime(enroll_date, dob, units = "days")) / 365.25,
     ## Race: combine categories using NIH docs at
     ##   https://grants.nih.gov/grants/guide/notice-files/NOT-OD-15-089.html,
@@ -964,8 +967,8 @@ baseline$apache_aps_adm_only <- ifelse(
 
 ## -- Combine prehospital, baseline datasets and save to analysisdata ----------
 adm_df <- left_join(
-  select(baseline, id, age_consent, gender, race_cat, ethnicity, insurance,
-         height, weight, bmi, home_antipsyc, charlson_total, frailty,
+  select(baseline, id, study_site, age_consent, gender, race_cat, ethnicity,
+         insurance, height, weight, bmi, home_antipsyc, charlson_total, frailty,
          frailty_f, icu_rsn, icu_rsn_other, apache_adm, apache_adm_only,
          apache_aps_adm, apache_aps_adm_only, sofa_adm, sofa_adm_only,
          sofa_mod_adm, sofa_mod_adm_only, cv_sofa_adm_f),
