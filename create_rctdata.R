@@ -6,6 +6,8 @@
 
 source("fake_make.R")
 
+rm(list = ls())
+
 ## -- Read in datasets from /analysisdata --------------------------------------
 ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
 allptevents_df <- readRDS("analysisdata/rds/allptevents.rds")
