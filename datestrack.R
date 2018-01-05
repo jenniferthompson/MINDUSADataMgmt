@@ -441,6 +441,21 @@ icu_summary <- icu_dates %>%
   summarise_at("icu_los", sum_na) %>%
   ungroup()
 
+## Get date of *final* ICU discharge for each patient who was discharged
+last_icu_dc <- icu_dates %>%
+  arrange(id, icu_adm) %>%
+  group_by(id) %>%
+  slice(n()) %>%
+  ungroup() %>%
+  mutate(
+    daysto_icudis = days_diff(icu_dis, randomization_time),
+    icudis = factor(
+      as.numeric(!is.na(icu_dis)),
+      levels = 1:0,
+      labels = c("Yes", "No")
+    )
+  )
+
 ## -- Create final summary dataset ---------------------------------------------
 ## For now, leaves out all dates as potential identifiers
 datestrack_df <- reduce(
@@ -463,7 +478,8 @@ datestrack_df <- reduce(
       )
     ),
     mv_summary,
-    icu_summary
+    icu_summary,
+    last_icu_dc %>% dplyr::select(id, icudis, daysto_icudis)
   ),
   left_join,
   by = "id"
@@ -473,7 +489,7 @@ datestrack_df <- reduce(
   select(id, coenroll_sails:mv_num, ever_mv, days_mv_all, days_mv_exp,
          on_mv_atrand, on_mv_rand24, ever_mvlib, ever_mvlib_rand24,
          daysto_mvlib_exp, daysto_mvlib_all,
-         icu_readmit_number, icu_los, hosp_los,
+         icu_readmit_number, icu_los, icudis, daysto_icudis, hosp_los,
          hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
          studywd, daysto_wd, studywd_ih, daysto_wd_ih,
          studywd_person:studywd_writing_other,
