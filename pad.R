@@ -374,7 +374,7 @@ write_csv(pad_daily, path = "analysisdata/csv/paddaily.csv")
 
 ## 3. Summary variables
 pad_summary <- reduce(
-  list(rand_asmts, pad_summary_int, pad_summary_ih),
+  list(data.frame(id = rand_pts), rand_asmts, pad_summary_int, pad_summary_ih),
   left_join, by = "id"
 )
 
