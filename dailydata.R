@@ -625,7 +625,9 @@ daily_df <- reduce(
 
 dailysum_df <- reduce(
   list(
-    data.frame(id = rand_pts),
+    data.frame(
+      id = ptstatus_df %>% filter(consented & !excluded_ever) %>% pull(id)
+    ),
     med_summary,
     sofa_consent_df,
     sofa_rand_df,
