@@ -571,7 +571,18 @@ sofa_summary <- reduce(
   by = "id"
 )
 
-## -- Find SOFA on the date of randomization, add to summary dataset -----------
+## -- Find SOFA on the date of consent -----------------------------------------
+sofa_consent_df <- sofa_df %>%
+  right_join(
+    allpts_events %>%
+      filter(days_since_consent == 0) %>%
+      dplyr::select(id, redcap_event_name),
+    by = c("id", "redcap_event_name")
+  ) %>%
+  dplyr::select(id, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp) %>%
+  rename_at(vars(-id), funs(paste0(., "_consent")))
+
+## -- Find SOFA on the date of randomization -----------------------------------
 sofa_rand_df <- sofa_df %>%
   right_join(
     randpts_events %>%
@@ -580,10 +591,7 @@ sofa_rand_df <- sofa_df %>%
     by = c("id", "redcap_event_name")
   ) %>%
   dplyr::select(id, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp) %>%
-  rename_at(
-    vars(-id),
-    funs(paste0(., "_rand"))
-  )
+  rename_at(vars(-id), funs(paste0(., "_rand")))
 
 ## -- Combine daily, summary information into single datasets ------------------
 daily_df <- reduce(
@@ -599,6 +607,7 @@ dailysum_df <- reduce(
   list(
     data.frame(id = rand_pts),
     med_summary,
+    sofa_consent_df,
     sofa_rand_df,
     sofa_summary
   ),
