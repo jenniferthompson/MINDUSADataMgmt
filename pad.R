@@ -235,7 +235,7 @@ pad_daily <- pad_long %>%
 ## before/after randomization.
 
 ## Get all PAD assessments within X hours before/after time of randomization
-within_hrs_rand <- 24
+within_hrs_rand <- 5
 
 rand_asmts <- pad_long %>%
   left_join(randdate_df, by = "id") %>%
@@ -243,8 +243,8 @@ rand_asmts <- pad_long %>%
   mutate(hrs_btwn_random = abs(
     as.numeric(difftime(randomization_time, assess_time, units = "hours"))
   )) %>%
-  ## We want non-missing, non-comatose RASSes on calendar date of randomization
-  filter(!is.na(rass) & rass >= -3 & date(randomization_time) == assess_date) %>%
+  ## We want non-missing, non-comatose RASSes within 5 hours of randomization
+  filter(!is.na(rass) & rass >= -3 & hrs_btwn_random) %>%
   ## Take non-missing RASS closest to randomization time per pt (before/after)
   arrange(id, hrs_btwn_random) %>%
   group_by(id) %>%
