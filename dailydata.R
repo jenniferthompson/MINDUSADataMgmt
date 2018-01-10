@@ -579,7 +579,17 @@ sofa_consent_df <- sofa_df %>%
       dplyr::select(id, redcap_event_name),
     by = c("id", "redcap_event_name")
   ) %>%
-  dplyr::select(id, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp) %>%
+  dplyr::select(
+    id, cv_sofa_daily, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp
+  ) %>%
+  mutate(
+    cv_sofa = factor(
+      cv_sofa_daily,
+      levels = get_levels_ih("cv_sofa_daily"),
+      labels = names(get_levels_ih("cv_sofa_daily"))
+    )
+  ) %>%
+  dplyr::select(-cv_sofa_daily) %>%
   rename_at(vars(-id), funs(paste0(., "_consent")))
 
 ## -- Find SOFA on the date of randomization -----------------------------------
@@ -590,7 +600,17 @@ sofa_rand_df <- sofa_df %>%
       dplyr::select(id, redcap_event_name),
     by = c("id", "redcap_event_name")
   ) %>%
-  dplyr::select(id, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp) %>%
+  dplyr::select(
+    id, cv_sofa_daily, sofa_raw, sofa_imp, sofa_mod_raw, sofa_mod_imp
+  ) %>%
+  mutate(
+    cv_sofa = factor(
+      cv_sofa_daily,
+      levels = get_levels_ih("cv_sofa_daily"),
+      labels = names(get_levels_ih("cv_sofa_daily"))
+    )
+  ) %>%
+  dplyr::select(-cv_sofa_daily) %>%
   rename_at(vars(-id), funs(paste0(., "_rand")))
 
 ## -- Combine daily, summary information into single datasets ------------------
