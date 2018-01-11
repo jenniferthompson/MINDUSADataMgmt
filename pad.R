@@ -169,8 +169,14 @@ pad_long <- pad_raw %>%
          cam_incomp_other)
 
 ## -- Determine presence of delirium and/or coma on every *day* ----------------
-## Coma: Present if any assessment has RASS -4 or -5
-## Delirium: Present if any assessment has RASS >= -3 and CAM+
+## CAM must be present to qualify for delirium or normal status.
+## Coma can be based on RASS or CAM alone.
+##
+## Coma: Present if RASS -4 or -5, or if RASS is missing and CAM is UTA
+## Delirium: Present RASS either missing or >= -3, and CAM+
+## Normal: CAM-
+## Missing: Anything else
+##
 ## Daily mental status:
 ## - delirious if any delirium present
 ## - otherwise, comatose if any coma present
@@ -185,8 +191,15 @@ pad_long <- pad_long %>%
     has_camrass = !is.na(cam) & !is.na(rass) & !(rass > -4 & cam == "Unable to Assess"),
     
     ## Indicators for delirium, coma
-    comatose = ifelse(!has_rass, NA, has_rass & rass < -3),
-    delirious = ifelse(!has_camrass, NA, rass > -4 & cam == "Positive"),
+    comatose = ifelse(
+      !has_rass & !has_cam, NA,
+      (has_rass & rass < -3) | (has_cam & cam == "Unable to Assess")
+    ),
+    delirious = ifelse(
+      !has_cam, NA,
+      (!has_rass | rass > -4) & cam == "Positive"
+    ),
+    normal = ifelse(!has_cam, NA, cam == "Negative"),
     ## Currently using most conservative approach: if we can't definitively
     ## say patient is/is not comatose and delirious, brain dysfunction is NA
     braindys =
@@ -200,7 +213,7 @@ subset(pad_long,
        select = c(id, redcap_event_name, rass, cam)) %>%
   left_join(ih_events %>% select(event_name, unique_event_name),
             by = c("redcap_event_name" = "unique_event_name")) %>%
-  write_csv(path = "conflicting_camrass.csv")
+  write_csv(path = "datachecks/conflicting_camrass.csv")
 
 ## Summarise coma, delirium, brain dysfunction; assign mental status each *day*
 pad_daily <- pad_long %>%
@@ -208,12 +221,14 @@ pad_daily <- pad_long %>%
   summarise(
     n_coma = sum(!is.na(comatose)),
     n_del = sum(!is.na(delirious)),
+    n_normal = sum(!is.na(normal)),
     n_dys = sum(!is.na(braindys)),
     has_rass = sum_na(has_rass) > 0,
     has_cam = sum_na(has_cam) > 0,
     has_camrass = sum_na(has_camrass) > 0,
     comatose = ifelse(n_coma == 0, NA, sum_na(comatose) > 0),
     delirious = ifelse(n_del == 0, NA, sum_na(delirious) > 0),
+    normal = ifelse(n_normal == 0, NA, sum_na(normal) > 0),
     braindys = ifelse(n_dys == 0, NA, sum_na(braindys) > 0)
   ) %>%
   ungroup() %>%
@@ -228,6 +243,97 @@ pad_daily <- pad_long %>%
       levels = 1:3, labels = c("Normal", "Delirious", "Comatose")
     )
   )
+
+# ## -- Explore missingness to help inform imputation decisions ------------------
+# ## All in-hospital days
+# allpts_events <- readRDS("analysisdata/rds/allptevents.rds")
+# pad_missing_ih <- pad_daily %>%
+#   right_join(
+#     dplyr::select(
+#       allpts_events,
+#       id, redcap_event_name, days_since_consent, intervention
+#     ),
+#     by = c("id", "redcap_event_name")
+#   ) %>%
+#   dplyr::select(id, days_since_consent, mental_status) %>%
+#   mutate(has_data_ih = factor(
+#     as.numeric(!is.na(mental_status)),
+#     levels = 0:1, labels = c("Missing", "Present")
+#   ))
+# 
+# pad_daysmiss_ih <- pad_missing_ih %>%
+#   group_by(id) %>%
+#   summarise(nmiss = sum(has_data_ih == "Missing")) %>%
+#   ungroup() %>%
+#   arrange(desc(nmiss), id) %>%
+#   mutate(new_id = 1:n())
+# 
+# pad_missing_ih <- left_join(pad_missing_ih, pad_daysmiss_ih, by = "id")
+# 
+# ggplot(data = pad_missing_ih %>% filter(nmiss > 0),
+#        aes(x = new_id, y = days_since_consent)) +
+#   geom_hline(yintercept = seq(0, 20, 1), colour = "gray50", size = 0.5) +
+#   geom_raster(aes(fill = has_data_ih)) +
+#   scale_fill_manual(values = c("darkred", "black")) +
+#   theme_dark() +
+#   theme(axis.text.x = element_blank(),
+#         axis.ticks.x = element_blank(),
+#         axis.title.x = element_blank(),
+#         legend.position = "bottom",
+#         legend.direction = "horizontal")
+# 
+# ## Days during the intervention period
+# pad_missing_int <- pad_daily %>%
+#   right_join(
+#     dplyr::select(
+#       randpts_events,
+#       id, redcap_event_name, study_day, study_status, intervention
+#     ),
+#     by = c("id", "redcap_event_name")
+#   ) %>%
+#   filter(intervention) %>%
+#   dplyr::select(id, study_day, study_status, mental_status) %>%
+#   mutate(has_data_int = factor(
+#     ifelse(
+#       study_status %in%
+#         c("Hospitalized; no longer being assessed", "Discharged", "Deceased"),
+#       3,
+#       as.numeric(!is.na(mental_status)) + 1
+#     ),
+#     levels = 1:3,
+#     labels = c("Missing", "Present",
+#                "No assessment needed\n(Discharged, deceased)")
+#   ))
+# 
+# ## How many days is each patient missing? Will order plot by this
+# pad_daysmiss_int <- pad_missing_int %>%
+#   group_by(id) %>%
+#   summarise(nmiss = sum(has_data_int == "Missing")) %>%
+#   ungroup() %>%
+#   arrange(desc(nmiss), id) %>%
+#   mutate(new_id = 1:n())
+# 
+# pad_missing_int <- left_join(pad_missing_int, pad_daysmiss_int, by = "id")
+# 
+# pad_missplot_int <-
+#   ggplot(data = pad_missing_int %>% filter(nmiss > 0),
+#          aes(x = new_id, y = study_day)) +
+#   geom_raster(aes(fill = has_data_int)) +
+#   # geom_hline(yintercept = seq(0, 13, 1), colour = "gray50", size = 0.5) +
+#   scale_y_continuous(breaks = seq(0, 13, 2)) +
+#   scale_fill_manual(values = c("darkred", "black", "gray20")) +
+#   theme_dark() +
+#   theme(plot.background = element_rect(fill = "gray50"),
+#         # axis.text.x = element_blank(),
+#         axis.ticks.x = element_blank(),
+#         axis.title.x = element_blank(),
+#         legend.position = "bottom",
+#         legend.direction = "horizontal",
+#         legend.background = element_blank())
+# 
+# pdf(file = "pad_missplot_int.pdf", width = 11, height = 4)
+# pad_missplot_int
+# dev.off()
 
 ## -- Figure out RASS level at the time of randomization -----------------------
 ## Tried matching by exact time of PAD assessment, but >100 patients had no RASS
@@ -261,7 +367,7 @@ rand_asmts <- pad_long %>%
 #     first_cam_date != randomization_date,
 #     select = c(id, first_cam_time, randomization_time)
 #   ),
-#   path = "campos_notat_randomization.csv"
+#   path = "datachecks/campos_notat_randomization.csv"
 # )
 
 ## -- Mental status variables during 14 days including+after randomization -----
