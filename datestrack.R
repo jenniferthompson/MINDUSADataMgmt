@@ -161,7 +161,7 @@ subset(dates_df,
        select = c(id, hospadm_time, icuadm_1_time, enroll_time,
                   randomization_time, days_hospadm_enroll, days_hospadm_rand,
                   days_icuadm_enroll, days_icuadm_rand)) %>%
-  write_csv(path = "admissiondate_errors.csv")
+  write_csv(path = "datachecks/admissiondate_errors.csv")
 
 ## -- Ventilation. Here. We. Go. -----------------------------------------------
 ## For our purposes, for now, all types of MV (invasive + noninvasive) will be
@@ -387,7 +387,7 @@ mv_summary <- reduce(
 #   labs(title = "Days between Randomization and First Initiation of MV,\nPatients Who Started MV after Randomization")
 # 
 # subset(first_mv_random, mv_start <= randomization_time & !(rand_mv | rand_nippv)) %>% 
-#   write_csv(path = "rand_onmv_noorgfailure.csv")
+#   write_csv(path = "datachecks/rand_onmv_noorgfailure.csv")
 
 ## -- ICU length of stay -------------------------------------------------------
 ## Total ICU LOS = sum of all individual ICU admissions. If patient has no ICU
@@ -433,7 +433,7 @@ icu_dates <- dates_df %>%
   
 ## CSV of negative ICU LOSes
 subset(icu_dates, icu_los < 0) %>%
-  write_csv(path = "icudate_errors.csv")
+  write_csv(path = "datachecks/icudate_errors.csv")
 
 ## Summarize ICU LOS for each patient
 icu_summary <- icu_dates %>%

@@ -309,7 +309,7 @@ first_dose <- doses_df %>%
 #   subset(first_dose,
 #          hrs_random_drug < 0,
 #          select = c(id, randomization_time, dose_dttm, hrs_random_drug)),
-#   path = "drug_before_randomization.csv"
+#   path = "datachecks/drug_before_randomization.csv"
 # )
 
 ## Combine days, doses, and discontinuation information; one record per patient
@@ -335,17 +335,17 @@ write_csv(
   subset(doses_df,
          held_other,
          select = c(id, redcap_event_name, dose_num, held_other_exp)),
-  path = "sd_hold_other.csv"
+  path = "datachecks/sd_hold_other.csv"
 )
 
 write_csv(
   subset(doses_df,
          permdc_other,
          select = c(id, redcap_event_name, dose_num, permdc_other_exp)),
-  path = "sd_permdc_other.csv"
+  path = "datachecks/sd_permdc_other.csv"
 )
 
-sink(file = "studydrug_checks.txt")
+sink(file = "datachecks/studydrug_checks.txt")
 
 ## Each held dose should have exactly 1 reason for hold; each permanently
 ## discontinued dose should have exactly 1 reason for d/c

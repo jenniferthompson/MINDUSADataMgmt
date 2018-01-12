@@ -99,7 +99,7 @@ allpts_events <- left_join(dates_raw, events_raw, by = "id") %>%
 
 ## -- Data checks --------------------------------------------------------------
 ## All results are written to a text file, ptevents_checks.txt
-sink("ptevents_checks.txt")
+sink("datachecks/ptevents_checks.txt")
 
 ## No one should have:
 ## - >4 pre-randomization days (enrollment + 4 PR days)

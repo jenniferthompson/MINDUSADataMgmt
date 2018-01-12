@@ -460,7 +460,7 @@ ptstatus_df <- ptstatus_df %>%
 ## -- Data checks --------------------------------------------------------------
 
 ## All results are written to a text file, ptstatus_checks.txt
-sink("ptstatus_checks.txt")
+sink("datachecks/ptstatus_checks.txt")
 
 ## All randomized patients should have status of died in-hospital, withdrew
 ##  in-hospital, or eligible for followup; some will both withdraw and die in
