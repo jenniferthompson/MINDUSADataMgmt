@@ -21,7 +21,9 @@ rm(list = ls())
 source("studydrug.R")
 
 rm(list = ls())
-source("pad.R")
-
-rm(list = ls())
 source("dailydata.R")
+
+## Needs to go after demog.R and dailydata.R, because we use baseline and daily
+## covariates to impute missing mental status
+rm(list = ls())
+source("pad.R")
