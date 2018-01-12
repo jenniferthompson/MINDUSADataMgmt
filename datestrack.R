@@ -98,9 +98,22 @@ dates_df <- dates_df %>%
     hosp_los            = days_diff(last_inhosp_time, randomization_time),
     daysto_hospdis      = days_diff(hospdis_time, randomization_time),
     daysto_wd           = days_diff(date(studywd_time), date(randomization_time)),
-    daysto_wd_ih        = ifelse(is.na(hospdis_time), daysto_wd, NA),
     daysto_death        = days_diff(death_time, randomization_time),
-    daysto_death_ih     = ifelse(is.na(hospdis_time), NA, daysto_death),
+    ## Days to in-hospital death, withdrawal:
+    ## If patient didn't die/withdraw, NA
+    ## If patient died/withdrew, but time is after hospital discharge, NA
+    ## Otherwise, days to overall death/withdrawal
+    daysto_death_ih     = case_when(
+      is.na(daysto_death)                              ~ as.numeric(NA),
+      !is.na(hospdis_time) & hospdis_time < death_time ~ as.numeric(NA),
+      TRUE                                             ~ daysto_death
+    ),
+    daysto_wd_ih     = case_when(
+      is.na(daysto_wd)                                   ~ as.numeric(NA),
+      !is.na(hospdis_time) &
+        date(hospdis_time) < date(studywd_time) ~ as.numeric(NA),
+      TRUE                                               ~ daysto_wd
+    ),
     daysto_dnr          = days_diff(dnr_time, randomization_time),
     daysto_stroke       = days_diff(stroke_time, randomization_time),
     daysto_trach        = days_diff(trach_time, randomization_time)
