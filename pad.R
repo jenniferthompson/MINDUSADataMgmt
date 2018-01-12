@@ -507,7 +507,6 @@ dcfd_avail <- pad_summary %>%
 ggplot(data = dcfd_avail, aes(x = n_dcfree_avail_int)) +
   facet_wrap(~ wd_inhosp) +
   geom_histogram(aes(fill = all_dcfd_avail), binwidth = 1) +
-  scale_fill_viridis_d(name = "Missing anything?", end = 0.75) +
   scale_x_continuous(
     breaks = seq.int(0, 14, 2),
     name = "Number of days with sufficient info to determine mental status"
