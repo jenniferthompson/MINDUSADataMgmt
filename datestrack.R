@@ -54,7 +54,17 @@ dates_df <- dates_raw %>%
   mutate_at(vars(one_of(date_vars)), ymd) %>%
   mutate_at(vars(one_of(time_vars)), ymd_hm) %>%
   ## Rename hospital admission time for consistency with ICU admissions
-  rename(hospadm_time = "hosp_admin_time")
+  rename(hospadm_time = "hosp_admin_time") %>%
+  ## Randomized patients who have both death and hospdis marked No all withdrew
+  ## in the hospital; change these indicators both to NA - by inspection of the
+  ## database, it appears that study staff were asked not to access PHI,
+  ## formally or informally
+  mutate(
+    withdrew_bothno = id %in% rand_pts & death == 0 & hospdis == 0,
+    death = ifelse(withdrew_bothno, NA, death),
+    hospdis = ifelse(withdrew_bothno, NA, hospdis)
+  ) %>%
+  dplyr::select(-withdrew_bothno)
 
 ## -- Find "last in-hospital" date/time: ---------------------------------------
 ## If hospital discharge available, use that
@@ -298,8 +308,9 @@ mv_dates <- dates_df %>%
                          days_diff(next_mv_start, mv_stop_final)),
     
     ## Indicator for whether discontinuation was "successful"
-    ##  (>48 hours between discontinuation and either reinitiation or death)
-    mv_dc_success = time_off_mv > 2
+    ##  (MV actually discontinued, and >48 hours between discontinuation and
+    ##   either reinitiation or death)
+    mv_dc_success = !is.na(mv_stop) & time_off_mv > 2
   )
 
 ## -- Summarize each patient's MV experience -----------------------------------
@@ -461,7 +472,8 @@ last_icu_dc <- icu_dates %>%
   slice(n()) %>%
   ungroup() %>%
   mutate(
-    daysto_icudis = days_diff(icu_dis, randomization_time),
+    daysto_icudis_all = days_diff(icu_dis_final, randomization_time),
+    daysto_icudis_exp = days_diff(icu_dis, randomization_time),
     icudis = factor(
       as.numeric(!is.na(icu_dis)),
       levels = 1:0,
@@ -483,7 +495,8 @@ datestrack_df <- reduce(
         dnr, daysto_dnr, sepsis, stroke, daysto_stroke, neurosx,
         trach, daysto_trach, liver_tx,
         int_num, noninv_num, mv_num, icu_readmit_number,
-        death, death_ih, death_wdtrt, death_summary, daysto_death, daysto_death_ih,
+        death, death_wdtrt, death_summary, daysto_death,
+        death_ih, daysto_death_ih,
         studywd, studywd_ih, studywd_person:studywd_writing_other,
         daysto_wd, daysto_wd_ih,
         hospdis, hospdis_loc, hospdis_loc_other, hospdis_vent,
@@ -492,21 +505,63 @@ datestrack_df <- reduce(
     ),
     mv_summary,
     icu_summary,
-    last_icu_dc %>% dplyr::select(id, icudis, daysto_icudis)
+    last_icu_dc %>%
+      dplyr::select(id, icudis, daysto_icudis_all, daysto_icudis_exp)
   ),
   left_join,
   by = "id"
 ) %>%
+  ## Create time-to-event variables, cut off or censored at a given time point
+  ## In-hospital outcomes all cut off at 30 days
+  mutate(
+    ## Thanks to A+ followup team, we can be pretty certain that if a patient
+    ## died, the date will be entered, provided we had permission to access PHI.
+    ## is.na(death) included for patients who withdrew in the hospital with no
+    ## PHI access permitted; these should be censored at time of withdrawal.
+    tte_death_30 = case_when(
+      is.na(hosp_los)                             ~ as.numeric(NA),
+      (is.na(death) | death == "Yes") &
+        is.na(daysto_death) & hosp_los <= 30      ~ hosp_los,
+      (is.na(death) | death == "Yes") &
+        !is.na(daysto_death) & daysto_death <= 30 ~ daysto_death,
+      TRUE                                        ~ 31
+    ),
+    event_death_30 = case_when(
+      death == "Yes" & daysto_death <= 30 ~ TRUE,
+      TRUE                                ~ FALSE
+    ),
+    tte_mvlib_30 = case_when(
+      !on_mv_rand24 | is.na(daysto_mvlib_all) ~ as.numeric(NA),
+      daysto_mvlib_all <= 30                  ~ daysto_mvlib_all,
+      TRUE                                    ~ 31
+    ),
+    event_mvlib_30 = case_when(
+      !on_mv_rand24                       ~ as.logical(NA),
+      ever_mvlib & daysto_mvlib_all <= 30 ~ TRUE,
+      TRUE                                ~ FALSE
+    ),
+    tte_icudis_30 = case_when(
+      is.na(daysto_icudis_all) ~ as.numeric(NA),
+      daysto_icudis_all <= 30  ~ daysto_icudis_all,
+      TRUE                     ~ 31
+    ),
+    event_icudis_30 = case_when(
+      icudis == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
+      TRUE                                      ~ FALSE
+    )
+  ) %>%
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
   ## discharge, withdrawal, death info
   select(id, coenroll_sails:mv_num, ever_mv, days_mv_all, days_mv_exp,
          on_mv_atrand, on_mv_rand24, ever_mvlib, ever_mvlib_rand24,
          daysto_mvlib_exp, daysto_mvlib_all,
-         icu_readmit_number, icu_los, icudis, daysto_icudis, hosp_los,
-         hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
+         icu_readmit_number, icu_los, icudis, daysto_icudis_all,
+         daysto_icudis_exp,
+         hosp_los, hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
          studywd, daysto_wd, studywd_ih, daysto_wd_ih,
          studywd_person:studywd_writing_other,
-         death, death_wdtrt, daysto_death, death_ih, daysto_death_ih)
+         death, death_wdtrt, daysto_death, death_ih, daysto_death_ih,
+         matches("^tte|event"))
 
 saveRDS(datestrack_df, file = "analysisdata/rds/datestrack.rds")
 write_csv(datestrack_df, path = "analysisdata/csv/datestrack.csv")
