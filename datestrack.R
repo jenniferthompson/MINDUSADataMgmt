@@ -421,6 +421,7 @@ icu_dates <- dates_df %>%
   select(id,
          randomization_time,
          last_inhosp_time,
+         death_time,
          matches("^icuadm\\_[1-6]\\_time$"),
          matches("^icudis\\_[1-6]\\_time$")) %>%
   
@@ -432,7 +433,8 @@ icu_dates <- dates_df %>%
   spread(key = icu_date, value = icu_time) %>%
   rename_at(vars(adm, dis), funs(paste0("icu_", .))) %>%
   
-  ## If no ICU discharge date entered, substitute last in-hospital time
+  ## If no ICU discharge date entered (eg, patient died before discharge),
+  ##  substitute last in-hospital time
   mutate(
     icu_dis_final = ifelse(!is.na(icu_dis), icu_dis, last_inhosp_time)
   ) %>%
@@ -448,11 +450,14 @@ icu_dates <- dates_df %>%
          (icu_adm < randomization_time & icu_dis_final >= randomization_time))
   ) %>%
   
-  ## Calculate length of each ICU admission
+  ## Calculate length of each ICU admission, determine whether it was
+  ##  "successful" - followed by at least 48 hours alive
   mutate(
     icu_los = ifelse(randomization_time > icu_adm,
                      days_diff(icu_dis_final, randomization_time),
-                     days_diff(icu_dis_final, icu_adm))
+                     days_diff(icu_dis_final, icu_adm)),
+    icudis_succ =
+      !(!is.na(death_time) & days_diff(death_time, icu_dis_final) <= 2)
   )
   
 ## CSV of negative ICU LOSes
@@ -474,10 +479,8 @@ last_icu_dc <- icu_dates %>%
   mutate(
     daysto_icudis_all = days_diff(icu_dis_final, randomization_time),
     daysto_icudis_exp = days_diff(icu_dis, randomization_time),
-    icudis = factor(
-      as.numeric(!is.na(icu_dis)),
-      levels = 1:0,
-      labels = c("Yes", "No")
+    icudis_succ = factor(
+      as.numeric(icudis_succ), levels = 1:0, labels = c("Yes", "No")
     )
   )
 
@@ -506,7 +509,7 @@ datestrack_df <- reduce(
     mv_summary,
     icu_summary,
     last_icu_dc %>%
-      dplyr::select(id, icudis, daysto_icudis_all, daysto_icudis_exp)
+      dplyr::select(id, icudis_succ, daysto_icudis_all, daysto_icudis_exp)
   ),
   left_join,
   by = "id"
@@ -546,8 +549,8 @@ datestrack_df <- reduce(
       TRUE                     ~ 31
     ),
     event_icudis_30 = case_when(
-      icudis == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
-      TRUE                                      ~ FALSE
+      icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
+      TRUE                                           ~ FALSE
     )
   ) %>%
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
@@ -555,7 +558,7 @@ datestrack_df <- reduce(
   select(id, coenroll_sails:mv_num, ever_mv, days_mv_all, days_mv_exp,
          on_mv_atrand, on_mv_rand24, ever_mvlib, ever_mvlib_rand24,
          daysto_mvlib_exp, daysto_mvlib_all,
-         icu_readmit_number, icu_los, icudis, daysto_icudis_all,
+         icu_readmit_number, icu_los, icudis_succ, daysto_icudis_all,
          daysto_icudis_exp,
          hosp_los, hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
          studywd, daysto_wd, studywd_ih, daysto_wd_ih,
