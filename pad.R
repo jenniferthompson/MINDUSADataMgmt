@@ -204,7 +204,8 @@ pad_long <- pad_long %>%
       !has_cam, NA,
       (!has_rass | rass > -4) & cam == "Positive"
     ),
-    normal = ifelse(!has_cam, NA, cam == "Negative"),
+    ## Normal if CAM present and negative, and RASS is not -4/-5
+    normal = ifelse(!has_cam | (has_rass & !has_camrass), NA, cam == "Negative"),
     ## Currently using most conservative approach: if we can't definitively
     ## say patient is/is not comatose and delirious, brain dysfunction is NA
     braindys =
