@@ -55,7 +55,9 @@ daily_raw <- import_df(
   ## Remove unneeded variables
   select(-daily_data_collection_form_complete) %>%
   ## Restrict to "real" events, as determined in ptevents.R
-  right_join(allpts_events, by = c("id", "redcap_event_name"))
+  right_join(allpts_events, by = c("id", "redcap_event_name")) %>%
+  ## Convert NMS indicator to logical
+  mutate(nms_daily = as.logical(nms_daily))
 
 ## -- Medications --------------------------------------------------------------
 ## Medications collected as "1. What was med 1? 2. What was dose of med 1?"
@@ -613,10 +615,25 @@ sofa_rand_df <- sofa_df %>%
   dplyr::select(-cv_sofa_daily) %>%
   rename_at(vars(-id), funs(paste0(., "_rand")))
 
+## -- Summarize neuroleptic malignant syndrome (NMS) (ever/never) --------------
+nms_summary <- daily_raw %>%
+  group_by(id) %>%
+  summarise(
+    ## Ever in the hospital
+    days_nms_avail_ih = sum(!is.na(nms_daily)),
+    ever_nms_ih = ifelse(days_nms_avail_ih == 0, NA, sum_na(nms_daily)),
+    ## During intervention phase
+    days_nms_avail_int = sum(intervention & !is.na(nms_daily)),
+    ever_nms_int = ifelse(days_nms_avail_int == 0, NA,
+                          sum_na(intervention & nms_daily))
+  ) %>%
+  ungroup()
+
 ## -- Combine daily, summary information into single datasets ------------------
 daily_df <- reduce(
   list(
     subset(allpts_events, select = c(id, redcap_event_name)),
+    daily_raw %>% select(id, redcap_event_name, nms_daily),
     med_df %>% select(-(days_since_consent:postint)),
     sofa_df %>% select(-abcde_icu, -(prerandom:in_icu))
   ),
@@ -628,6 +645,7 @@ dailysum_df <- reduce(
     data.frame(
       id = ptstatus_df %>% filter(consented & !excluded_ever) %>% pull(id)
     ),
+    nms_summary %>% dplyr::select(-starts_with("days_nms_avail")),
     med_summary,
     sofa_consent_df,
     sofa_rand_df,
