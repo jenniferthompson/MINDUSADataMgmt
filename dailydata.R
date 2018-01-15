@@ -40,7 +40,7 @@ icudel_meds <- gs_key("1ZGfxAmTFxGgfzjwE0trrpKEn_21QDwCSGJIv-E5kiE4") %>%
   select(-2)
 names(icudel_meds) <- c("med_name", "med_abbrev")
 
-## -- Download variables from dates tracking form ------------------------------
+## -- Download variables from daily data form ----------------------------------
 daily_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
   id_field = "id",
