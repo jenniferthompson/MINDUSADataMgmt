@@ -20,9 +20,22 @@ The following variable naming conventions are used:
 
 ### Scripts
 
+*Some scripts need to be run before others; these cases are noted*
+
+#### Utilities
+
+- [data_functions.R](data_functions.R): Includes functions used in multiple data management scripts. Subject areas:
+    - Dealing with REDCap (eg, wrappers to download raw data and data dictionaries)
+    - Working with factors + REDCap data dictionaries
+    - Base functions with partial arguments supplied (eg, `sum_na <- function(x){ sum(x, na.rm = TRUE, ...) }`)
+    - More complex functions for operations common with this data
 - [fake_make.R](fake_make.R): Sources all following scripts in proper order. One day after a deadline I'll figure out how to do a real makefile. Till then, this'll do.
-- [ptstatus.R](ptstatus.R): Combines data from exclusion log and in-hospital database to create a dataset, `ptstatus_df`, of patient status at various time points + related information. Automated data checks: `ptstatus_checks.txt`.
-- [ptevents.R](ptevents.R): Creates two datasets:
+- [create_rctdata.R](create_rctdata.R): Sources `fake_make.R` and saves fresh datasets needed to conduct analysis of primary in-hospital aims of the study to a separate repository. [If I use a `make` approach, this should **not** be included, because once the final manuscript version of this dataset is created it will stay constant.]
+
+#### Data management
+
+- [ptstatus.R](ptstatus.R): Combines data from exclusion log and in-hospital database to create a dataset, `ptstatus_df`, of patient status at various time points + related information. **Should be run first**, as lists of randomized and consented patients are pulled from this dataset for use in other scripts. Automated data checks: `datachecks/ptstatus_checks.txt`.
+- [ptevents.R](ptevents.R): **Should be run second**, as these datasets are used in other scripts. Creates two datasets:
     - `allpts_events`: All REDCap events for each patient, days since consent and randomization (if appropriate), and whether patient was known to be in ICU each day
     - `randpts_events`: A record for every day of the intervention/post-intervention period for every randomized patient, beginning on day of randomization; this includes indicators for patient status each day (in ICU, in REDCap, hospitalized, etc), as well as an overall variable for study status: intervention period; post-intervention period; hospitalized, but no longer being tracked daily; discharged; deceased; or withdrawn.
 - [demog.R](demog.R): Creates data frame, `admission_df`, of demographic, pre-hospital, and ICU admission information for all consented patients.
@@ -30,8 +43,21 @@ The following variable naming conventions are used:
 - [studydrug.R](studydrug.R): Creates two data frames related to study drug administration:
     - `ptdrug_df`: one record per patient, describing number of days and doses of study drug; summarizing amounts of drug and number of times held for various reasons; and reason study drug was first permanently discontinued
     - `doses_df`: one record per potential dose of study drug (up to 3 per day), describing amounts, holds/discontinuations, QTc
+- [dailydata.R](dailydata.R): Creates two data frames related to data from the Daily Data Collection Form:
+    - `daily_df`: one record per day in the hospital, with variables for NMS (indicator), medication doses, variables used for SOFA calculation and total SOFA scores (full + modified, using raw data + imputed).
+    - `dailysum_df`: one record per patient, with:
+        - Indicators for whether patient had NMS, ever and during intervention
+        - Medication variables:
+            - indicators for whether patient had Drug X ever in the hospital, during the pre-randomization period, during the intervention period, ever in the ICU, in the ICU during intervention
+            - proportion of days the patient had Drug X during the time periods listed above
+            - mean dose of Drug X during the time periods listed above, among all patients and among those exposed
+            - total dose of Drug X during the time periods listed above, among all patients and among those exposed
+        - SOFA variables (with versions using both original, raw data and using imputation rules):
+            - Full, modified, and CV SOFA scores on the day of consent
+            - Full, modified, and CV SOFA scores on the day of randomization
+            - Mean, maximum, minimum full and modified SOFA scores during the time periods listed above for medications
 - [pad.R](pad.R): Creates three data frames with various levels of detail about the Pain, Agitation and Delirium form:
     - `pad_long`: Every single assessment done (or that should have been done) during the entire hospitalization
     - `pad_daily`: One record per *day* during the hospitalization, summarizing whether patient was delirious, comatose, etc that day
     - `pad_summary`: One record per *patient*, summarizing coma, delirium, and DCFDs during the entire intervention period (study days 0-13)
-- [create_rctdata.R](create_rctdata.R): Sources `fake_make.R` and saves fresh datasets needed to conduct analysis of primary in-hospital aims of the study to a separate repository. [If I use a `make` approach, this should **not** be included, because once the final manuscript version of this dataset is created it will stay constant.]
+    - **Should be run after demog.R and dailydata.R**, because we use variables from those datasets to impute missing mental status.
