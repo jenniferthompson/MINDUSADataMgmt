@@ -10,7 +10,7 @@ source("ptstatus.R")
 rm(list = ls())
 source("ptevents.R")
 
-## From here on out these should stand alone
+## From here on out these should stand alone, with one exception
 rm(list = ls())
 source("demog.R")
 
@@ -22,6 +22,9 @@ source("studydrug.R")
 
 rm(list = ls())
 source("dailydata.R")
+
+rm(list = ls())
+source("safety.R")
 
 ## Needs to go after demog.R and dailydata.R, because we use baseline and daily
 ## covariates to impute missing mental status
