@@ -41,13 +41,15 @@ rand_pts <- ptstatus_df %>%
 ## Options 1-3 are downloaded alongside additional safety data; they are
 ## recorded on a daily basis. The AE form is on the Enrollment event and thus
 ## AEs are downloaded separately.
+torsades_ecg_vars <- str_subset(ih_dd$field_name, "ecg\\_interpretation")
+torsades_permdc_vars <- str_subset(ih_dd$field_name, "permanent\\_stop\\_why")
+
 safety_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
   id_field = "id",
   export_labels = "none",
   fields = c("id", "redcap_event_name", "arrhythmia_daily",
-             str_subset(ih_dd$field_name, "ecg\\_interpretation"),
-             str_subset(ih_dd$field_name, "permanent\\_stop\\_why")),
+             torsades_ecg_vars, torsades_permdc_vars),
   forms = c("daily_safety_assessment_form"),
   events = setdiff(
     ih_events$unique_event_name,
@@ -125,8 +127,94 @@ torsades_events <- ae_raw %>%
     days_since_consent = days_diff(ae_date, date(enroll_time)),
     days_since_randomization = days_diff(ae_date, date(randomization_time)),
     ## Indicator for when we merge with daily data
-    ae_torsades = TRUE
+    torsades_ae = TRUE
   )
   
 ## Daily data: Based on arrhythmia, ECG, study drug, AE info, create a single
 ## indicator for whether patient had Torsades on a given day
+
+torsades_ecg_vars <- paste0(torsades_ecg_vars, "_5")
+
+torsades_df <- safety_raw %>%
+  left_join(
+    torsades_events,
+    by = c("id", "days_since_consent", "days_since_randomization")
+  ) %>%
+  ## Update indicator for Torsades AE
+  mutate(torsades_ae = ifelse(is.na(torsades_ae), FALSE, torsades_ae)) %>%
+  ## Indicator for whether patient had Torsades today via any of the following:
+  ## - Arrhythmia (arrhythymia_daily_4 = 1)
+  ## - ECG interpretation (ecg_interpretation_x_5 = 1)
+  ## - Reason study drug discontinued (permanent_stop_why_x = 5)
+  mutate(
+    torsades_arr    = arrhythmia_daily_4 == 1,
+    torsades_ecg    = rowSums(.[, torsades_ecg_vars], na.rm = TRUE) > 0,
+    torsades_permdc = rowSums(.[, torsades_permdc_vars] == 5, na.rm = TRUE) > 0
+  ) %>%
+  mutate(
+    torsades_any =
+      rowSums(.[, str_subset(names(.), "^torsades\\_")], na.rm = TRUE) > 0
+  )
+
+## Summarize Torsades by patient, phase (in hospital; during intervention)
+torsades_summary_ih <- torsades_df %>%
+  group_by(id) %>%
+  summarise_at(
+    vars(starts_with("torsades_")),
+    funs(days = sum_na(.))
+  ) %>%
+  mutate_at(vars(-id), funs(ever = . > 0)) %>%
+  ungroup() %>%
+  rename_at(
+    vars(ends_with("_days")),
+    funs(paste0("days_", gsub("\\_days$", "", .), "_ih"))
+  ) %>%
+  rename_at(
+    vars(ends_with("_ever")),
+    funs(paste0("ever_", gsub("\\_days\\_ever$", "", .), "_ih"))
+  )
+  
+torsades_summary_int <- torsades_df %>%
+  filter(intervention) %>%
+  group_by(id) %>%
+  summarise_at(
+    vars(starts_with("torsades_")),
+    funs(days = sum_na(.))
+  ) %>%
+  mutate_at(vars(-id), funs(ever = . > 0)) %>%
+  ungroup() %>%
+  rename_at(
+    vars(ends_with("_days")),
+    funs(paste0("days_", gsub("\\_days$", "", .), "_int"))
+  ) %>%
+  rename_at(
+    vars(ends_with("_ever")),
+    funs(paste0("ever_", gsub("\\_days\\_ever$", "", .), "_int"))
+  )
+
+## -- Combine and save final datasets ------------------------------------------
+## Daily data
+safety_df <- reduce(
+  list(
+    allpts_events %>% dplyr::select(id, redcap_event_name),
+    eps_df %>% dplyr::select(id, redcap_event_name, eps_total),
+    torsades_df %>% dplyr::select(id, redcap_event_name, starts_with("torsades_"))
+  ),
+  left_join, by = c("id", "redcap_event_name")
+)
+
+saveRDS(safety_df, file = "analysisdata/rds/safetydaily.rds")
+write_csv(safety_df, path = "analysisdata/csv/safetydaily.csv")
+
+## Summary variables (NOTE: waiting on final EPS info from PIs)
+safety_summary <- reduce(
+  list(
+    data.frame(id = unique(allpts_events$id)),
+    torsades_summary_ih,
+    torsades_summary_int
+  ),
+  left_join, by = "id"
+)
+
+saveRDS(safety_summary, file = "analysisdata/rds/safetysummary.rds")
+write_csv(safety_summary, path = "analysisdata/csv/safetysummary.csv")
