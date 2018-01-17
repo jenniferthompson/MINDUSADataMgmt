@@ -381,6 +381,7 @@ pad_forimputation <- pad_daily %>%
   left_join(
     dplyr::select(
       daily_df,
+      -nms_daily,
       -matches("^daily\\_midaz|diaz|loraz|fent|hydromorph|morph|halop|quet|ari|olanz|risp|zipras$"),
       -matches("sofa\\_.*[imp|raw]$")
     ),
