@@ -86,21 +86,79 @@ eps_vars <- c("elbow_rigidity", "wrist_rigidity", "glabella_tap",
               "resting_tremor", "salivation")
 
 eps_df <- safety_raw %>%
-  dplyr::select(id, redcap_event_name, one_of(eps_vars)) %>%
+  dplyr::select(id, redcap_event_name, intervention, one_of(eps_vars)) %>%
   ## All EPS variables have numeric values which reflect actual score, except
-  ## that 5 = "not done"; in addition, glabellar tap has a value of 99 = UTA
-  ## Assign 5, 99 to NA
+  ## that 5 = "not done". In addition, glabellar tap has a value of 99 = UTA.
+  ## Pending discussion with PIs, we're going to consider both 5 and 99 NA.
   mutate_at(vars(one_of(eps_vars)), funs(ifelse(. %in% c(5, 99), NA, .))) %>%
   ## How many EPS symptoms are missing each day?
   mutate(eps_symptoms_avail = rowSums(!is.na(.[, eps_vars]))) %>%
-  ## If all symptoms are present, EPS score = sum of all components / 5
-  ## For now, if >=1 symptom is missing, total score is missing
+  ## If >=1 EPS symptom is present, EPS score = mean of all symptom scores.
+  ## If all symptoms are missing/not done, score is NA.
   mutate(
-    eps_total = ifelse(eps_symptoms_avail < 5, NA, rowMeans(.[, eps_vars]))
+    eps_score = ifelse(eps_symptoms_avail == 0, NA,
+                       rowMeans(.[, eps_vars], na.rm = TRUE))
+  ) %>%
+  ## Indicators for whether each symptom is >=3
+  ##  Per our protocol, if 3 or more symptoms had scores >=3, we considered it
+  ##  an official diagnosis of EPS and study drug should have been stopped.
+  mutate_at(
+    vars(one_of(eps_vars)),
+    funs(eps = . >= 3)
+  ) %>%
+  rename_at(
+    vars(ends_with("_eps")),
+    funs(ifelse(. == "resting_tremor_eps", "eps_tremor",
+                paste0("eps_", gsub("\\_.+", "", .))))
+  ) %>%
+  mutate(
+    eps_symptoms =
+      rowSums(.[, paste0("eps_", c("elbow", "wrist", "glabella", "tremor",
+                                   "salivation"))],
+              na.rm = TRUE),
+    eps_yn = eps_symptoms >= 3
   )
 
-eps_ge3 <- eps_df %>%
-  summarise_at(vars(one_of(eps_vars)), funs(sum(. >= 3, na.rm = TRUE)))
+## Summarize EPS for each patient during entire hospitalization, intervention pd
+## - Mean, min, max score
+## - Days with each symptom >=3
+## - Days with official EPS diagnosis
+eps_summary_ih <- eps_df %>%
+  group_by(id) %>%
+  summarise(
+    days_eps_elbow_ih      = sum_na(eps_elbow),
+    days_eps_wrist_ih      = sum_na(eps_wrist),
+    days_eps_glabella_ih   = sum_na(eps_glabella),
+    days_eps_tremor_ih     = sum_na(eps_tremor),
+    days_eps_salivation_ih = sum_na(eps_salivation),
+    days_eps_ih            = sum_na(eps_yn),
+    ever_eps_ih            = sum_na(eps_yn) > 0,
+    eps_score_min_ih       = min_na(eps_score),
+    eps_score_max_ih       = max_na(eps_score),
+    eps_score_mean_ih      = mean_na(eps_score),
+    eps_score_min_exp_ih   = min_na(eps_score[eps_yn]),
+    eps_score_max_exp_ih   = max_na(eps_score[eps_yn]),
+    eps_score_mean_exp_ih  = mean_na(eps_score[eps_yn])
+  )
+
+eps_summary_int <- eps_df %>%
+  filter(intervention) %>%
+  group_by(id) %>%
+  summarise(
+    days_eps_elbow_int      = sum_na(eps_elbow),
+    days_eps_wrist_int      = sum_na(eps_wrist),
+    days_eps_glabella_int   = sum_na(eps_glabella),
+    days_eps_tremor_int     = sum_na(eps_tremor),
+    days_eps_salivation_int = sum_na(eps_salivation),
+    days_eps_int            = sum_na(eps_yn),
+    ever_eps_int            = sum_na(eps_yn) > 0,
+    eps_score_min_int       = min_na(eps_score),
+    eps_score_max_int       = max_na(eps_score),
+    eps_score_mean_int      = mean_na(eps_score),
+    eps_score_min_exp_int   = min_na(eps_score[eps_yn]),
+    eps_score_max_exp_int   = max_na(eps_score[eps_yn]),
+    eps_score_mean_exp_int  = mean_na(eps_score[eps_yn])
+  )
 
 ## -- Torsades de pointes ------------------------------------------------------
 ## Eventual goal: Have an indicator for whether patient experienced Torsades on
@@ -197,7 +255,7 @@ torsades_summary_int <- torsades_df %>%
 safety_df <- reduce(
   list(
     allpts_events %>% dplyr::select(id, redcap_event_name),
-    eps_df %>% dplyr::select(id, redcap_event_name, eps_total),
+    eps_df %>% dplyr::select(id, redcap_event_name, eps_score:eps_yn),
     torsades_df %>% dplyr::select(id, redcap_event_name, starts_with("torsades_"))
   ),
   left_join, by = c("id", "redcap_event_name")
@@ -210,6 +268,8 @@ write_csv(safety_df, path = "analysisdata/csv/safetydaily.csv")
 safety_summary <- reduce(
   list(
     data.frame(id = unique(allpts_events$id)),
+    eps_summary_ih,
+    eps_summary_int,
     torsades_summary_ih,
     torsades_summary_int
   ),
