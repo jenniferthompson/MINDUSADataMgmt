@@ -25,8 +25,9 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ## Add event_num to help with sorting events later
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
-## -- Bring in ptstatus_df; we'll use some variables from there ----------------
+## -- Bring in ptstatus_df and allpts_events -----------------------------------
 ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
+allpts_events <- readRDS("analysisdata/rds/allptevents.rds")
 
 ## Vector of all randomized patients never excluded
 rand_pts <- ptstatus_df %>%
@@ -78,7 +79,9 @@ med_df <- daily_raw %>%
     med_name = factor(
       med_name,
       levels = get_levels_ih("daily_med_1"),
-      labels = names(get_levels_ih("daily_med_1"))
+      labels = gsub(
+        "Remifentanyl", "Remifentanil", names(get_levels_ih("daily_med_1"))
+      )
     ),
     
     ## COMBINE Olanzapine, Olanzapine/Fluoxetine for daily totals (EWE Dec 2017)
@@ -96,11 +99,11 @@ med_df <- daily_raw %>%
   
   ## Merge on drug abbreviations
   left_join(icudel_meds, by = "med_name") %>%
+  ## Keep only drugs given
+  filter(!is.na(med_abbrev)) %>%
   mutate(med_abbrev = paste0("daily_", med_abbrev)) %>%
   select(-med_name) %>%
-  ## Note: We need the daily_NA level here to keep at least one record per
-  ##  hospitalization day; we'll throw out that variable later
-  
+
   ## Reshape back to wide format, one record per day with one column per med
   spread(key = med_abbrev, value = med_total) %>%
   
@@ -141,14 +144,18 @@ med_df <- daily_raw %>%
   
   ## Opioids: Fentanyl equivalents (methadone not collected)
   ## fentanyl =
+  ##   remifentanil (same)
   ##   (morphine / 50)*1000 
   ##   (hydromorphone / 7.5)*1000
   mutate(
     daily_morph_fent      = (daily_morph / 50) * 1000,
     daily_hydromorph_fent = (daily_hydromorph / 7.5) * 1000,
     
-    daily_opioid = daily_fent + daily_morph_fent + daily_hydromorph_fent
-  )
+    daily_opioid =
+      daily_fent + daily_remi + daily_morph_fent + daily_hydromorph_fent
+  ) %>%
+  ## Make sure we have at least one row per in-hospital day
+  right_join(allpts_events, by = c("id", "redcap_event_name"))
 
 # ## Visual data checks of drug conversions
 # ## Summary: There are some patients with REALLY high values on some days, but
@@ -179,9 +186,9 @@ med_df <- daily_raw %>%
 # walk(drug_sets, check_drug_conversions)
 
 med_df <- med_df %>%
-  ## Remove converted versions and meaningless daily_NA from final dataset
-  ## (daily_NA is an artifact of the reshaping process)
-  select(-daily_NA, -matches("^daily\\_[a-z]+\\_")) %>%
+  ## Keep only ID, event, original/combined drugs in final dataset
+  ## (removes converted versions, artifacts of merge with allpts_events)
+  select(id, redcap_event_name, matches("^daily\\_[a-z]+$")) %>%
   ## Add yes/no daily medications back on, create more meaningful variable names
   left_join(daily_raw %>%
               select(id, redcap_event_name,
