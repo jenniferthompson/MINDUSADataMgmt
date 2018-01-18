@@ -178,8 +178,8 @@ pad_long <- pad_raw %>%
 ## Coma can be based on RASS or CAM alone.
 ##
 ## Coma: Present if RASS -4 or -5, or if RASS is missing and CAM is UTA
-## Delirium: Present RASS either missing or >= -3, and CAM+
-## Normal: CAM-
+## Delirium: Present if RASS either missing or >= -3, and CAM+
+## Normal: Present if RASS either missing or >= -3, and CAM-
 ## Missing: Anything else
 ##
 ## Daily mental status:
@@ -193,24 +193,43 @@ pad_long <- pad_long %>%
     ## If RASS > -4 but CAM is UTA, consider CAM missing; this shouldn't happen
     has_rass = !is.na(rass),
     has_cam = !is.na(cam),
-    has_camrass = !is.na(cam) & !is.na(rass) & !(rass > -4 & cam == "Unable to Assess"),
-    
-    ## Indicators for delirium, coma
-    comatose = ifelse(
-      !has_rass & !has_cam, NA,
-      (has_rass & rass < -3) | (has_cam & cam == "Unable to Assess")
+    has_camrass =
+      !is.na(cam) & !is.na(rass) & !(rass > -4 & cam == "Unable to Assess"),
+    ## Indicator for whether CAM, RASS conflict: RASS > -4 and CAM is UTA, or vv
+    camrass_conflict = case_when(
+      has_rass & rass > -4 & has_cam & cam == "Unable to Assess"          ~ TRUE,
+      has_rass & rass < -3 & has_cam & cam %in% c("Positive", "Negative") ~ TRUE,
+      TRUE                                                                ~ FALSE
     ),
-    delirious = ifelse(
-      !has_cam, NA,
-      (!has_rass | rass > -4) & cam == "Positive"
+
+    ## Indicators for delirium, coma, normal status
+    comatose = case_when(
+      camrass_conflict | (!has_rass & !has_cam) ~ as.logical(NA),
+      has_rass & rass < -3                      ~ TRUE,
+      has_cam & cam == "Unable to Assess"       ~ TRUE,
+      TRUE                                      ~ FALSE
     ),
-    ## Normal if CAM present and negative, and RASS is not -4/-5
-    normal = ifelse(!has_cam | (has_rass & !has_camrass), NA, cam == "Negative"),
+    delirious = case_when(
+      camrass_conflict            ~ as.logical(NA),
+      has_rass & rass < -3        ~ FALSE,
+      !has_cam                    ~ as.logical(NA),
+      has_cam & cam == "Positive" ~ TRUE,
+      TRUE                        ~ FALSE
+    ),
+    normal = case_when(
+      camrass_conflict | !has_cam ~ as.logical(NA),
+      has_cam & cam == "Negative" ~ TRUE,
+      TRUE                        ~ FALSE
+    ),
     ## Currently using most conservative approach: if we can't definitively
     ## say patient is/is not comatose and delirious, brain dysfunction is NA
-    braindys =
-      ifelse(is.na(comatose) | is.na(delirious), NA,
-             (!is.na(comatose) & comatose) | (!is.na(delirious) & delirious))
+    braindys = case_when(
+      camrass_conflict              ~ as.logical(NA),
+      !is.na(comatose) & comatose   ~ TRUE,
+      !is.na(delirious) & delirious ~ TRUE,
+      !is.na(normal) & normal       ~ FALSE,
+      TRUE                          ~ as.logical(NA)
+    )
   )
 
 ## Write conflicting CAM/RASSes to CSV for data cleaning
@@ -483,11 +502,11 @@ pad_int <- pad_daily %>%
   filter(study_day %in% 0:13) %>%
   mutate(
     dcfree = case_when(
-      study_status == "Deceased"                          ~ FALSE,
-      !is.na(mental_status_imp) &
-        mental_status_imp %in% c("Comatose", "Delirious") ~ FALSE,
-      study_status == "Discharged"                        ~ TRUE,
-      TRUE                                                ~ as.logical(NA)
+      study_status == "Deceased"                        ~ FALSE,
+      study_status == "Discharged"                      ~ TRUE,
+      is.na(mental_status_imp)                          ~ as.logical(NA),
+      mental_status_imp %in% c("Comatose", "Delirious") ~ FALSE,
+      TRUE                                              ~ TRUE
     )
   )
 
