@@ -88,9 +88,11 @@ eps_vars <- c("elbow_rigidity", "wrist_rigidity", "glabella_tap",
 eps_df <- safety_raw %>%
   dplyr::select(id, redcap_event_name, intervention, one_of(eps_vars)) %>%
   ## All EPS variables have numeric values which reflect actual score, except
-  ## that 5 = "not done". In addition, glabellar tap has a value of 99 = UTA.
-  ## Pending discussion with PIs, we're going to consider both 5 and 99 NA.
-  mutate_at(vars(one_of(eps_vars)), funs(ifelse(. %in% c(5, 99), NA, .))) %>%
+  ## that 5 = "not done". Change these to NA.
+  mutate_at(vars(one_of(eps_vars)), funs(ifelse(. %in% c(5), NA, .))) %>%
+  ## In addition, glabellar tap has a value of 99 = UTA. Per PIs (Jan 2018),
+  ## this should be considered equivalent to a score of 0.
+  mutate_at(vars(one_of(eps_vars)), funs(ifelse(. %in% c(99), 0, .))) %>%
   ## How many EPS symptoms are missing each day?
   mutate(eps_symptoms_avail = rowSums(!is.na(.[, eps_vars]))) %>%
   ## If >=1 EPS symptom is present, EPS score = mean of all symptom scores.
