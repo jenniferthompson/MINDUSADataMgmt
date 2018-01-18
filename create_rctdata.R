@@ -40,8 +40,70 @@ trt_df <- data.frame(
   )
 )
 
+## -- Idea here: Combine datasets, then restrict to only variables we need -----
+## -- for main RCT analysis ----------------------------------------------------
+
+## Create data frame of all randomized patients + treatment assignment
+rand_df <- ptstatus_df %>%
+  filter(randomized) %>%
+  left_join(trt_df, by = "id") %>%
+  dplyr::select(id, trt)
+
+## Vector of IDs for all randomized patients
+rand_pts <- rand_df %>% pull(id)
+
+## -- All consented patients ---------------------------------------------------
+## Want to describe demographics, ICU admission characteristics for all patients
+## consented and not excluded
+ptsummary_all_df <- left_join(ptstatus_df, admission_df, by = "id") %>%
+  left_join(
+    dplyr::select(dailysummary_df, id, sofa_imp_consent, cv_sofa_consent),
+    by = "id"
+  ) %>%
+  filter(consented & !excluded_ever) %>%
+  dplyr::select(-(screened:exc_other))
+
+## Combine longitudinal datasets: One record per day in the hospital
+daily_all_df <- reduce(
+  list(
+    allptevents_df,
+    paddaily_df,
+    dailydata_df,
+    safetydaily_df
+  ),
+  left_join,
+  by = c("id", "redcap_event_name")
+)
+
+## -- All randomized patients --------------------------------------------------
+## One record per randomized patient with baseline, summary variables
+ptsummary_df <- reduce(
+  list(
+    ptsummary_all_df %>% filter(randomized) %>% left_join(rand_df, by = "id"),
+    datestrack_df,
+    padsummary_df,
+    dailysummary_df,
+    safetysummary_df,
+    ptdrug_df
+  ),
+  left_join,
+  by = "id"
+)
+
+## One record per day after randomization, including post-discharge/death
+daily_int_df <- reduce(
+  list(
+    randptevents_df %>% left_join(trt_df, by = "id"),
+    paddaily_df,
+    dailydata_df,
+    safetydaily_df
+  ),
+  left_join,
+  by = c("id", "redcap_event_name")
+)
+
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
-save(trt_df, ptstatus_df, allptevents_df, randptevents_df, admission_df,
-     datestrack_df, ptdrug_df, doses_df, padasmts_df, paddaily_df, padsummary_df,
-     dailydata_df, dailysummary_df, safetydaily_df, safetysummary_df,
+save(ptstatus_df, rand_df, rand_pts,
+     ptsummary_all_df, daily_all_df,
+     ptsummary_df, daily_int_df, doses_df, ptdrug_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")
