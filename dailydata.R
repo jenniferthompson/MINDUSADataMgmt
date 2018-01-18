@@ -621,11 +621,11 @@ nms_summary <- daily_raw %>%
   summarise(
     ## Ever in the hospital
     days_nms_avail_ih = sum(!is.na(nms_daily)),
-    ever_nms_ih = ifelse(days_nms_avail_ih == 0, NA, sum_na(nms_daily)),
+    ever_nms_ih = ifelse(days_nms_avail_ih == 0, NA, sum_na(nms_daily) > 0),
     ## During intervention phase
     days_nms_avail_int = sum(intervention & !is.na(nms_daily)),
     ever_nms_int = ifelse(days_nms_avail_int == 0, NA,
-                          sum_na(intervention & nms_daily))
+                          sum_na(intervention & nms_daily) > 0)
   ) %>%
   ungroup()
 
