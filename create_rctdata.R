@@ -23,6 +23,7 @@ dailydata_df     <- readRDS("analysisdata/rds/dailydata.rds")
 dailysummary_df  <- readRDS("analysisdata/rds/dailysummary.rds")
 safetydaily_df   <- readRDS("analysisdata/rds/safetydaily.rds")
 safetysummary_df <- readRDS("analysisdata/rds/safetysummary.rds")
+torsades_df      <- readRDS("analysisdata/rds/torsadesaes.rds")
 
 ## -- Temporary: Create dataset of fake treatment groups -----------------------
 ## Final treatment groups will be added once data clean is finalized, database
@@ -102,8 +103,11 @@ daily_int_df <- reduce(
   by = c("id", "redcap_event_name")
 )
 
+## Add treatment group to Torsades info
+torsades_df <- right_join(trt_df, torsades_df, by = "id")
+
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
 save(ptstatus_df, rand_df, rand_pts,
      ptsummary_all_df, daily_all_df,
-     ptsummary_df, daily_int_df, doses_df, ptdrug_df,
+     ptsummary_df, daily_int_df, doses_df, ptdrug_df, torsades_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")

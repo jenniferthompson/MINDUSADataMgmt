@@ -174,18 +174,32 @@ torsades_events <- ae_raw %>%
   dplyr::select(
     id, enroll_time, randomization_time,
     matches("^ae\\_date\\_[0-9]$"),
-    # starts_with("ae_portion"),
-    starts_with("ae_vcc_final")
+    starts_with("ae_portion"),
+    starts_with("ae_vcc_final"),
+    starts_with("ae_serious"),
+    starts_with("ae_description")
   ) %>%
-  gather(key = ae_var_time, value = ae_value, ae_date_1:ae_vcc_final_3) %>%
+  gather(key = ae_var_time, value = ae_value, ae_date_1:ae_description_3) %>%
   separate(ae_var_time, into = c("ae_var", "ae_num"), sep = "\\_(?=[0-9]$)") %>%
   spread(key = ae_var, value = ae_value) %>%
   filter(ae_vcc_final == 3) %>%
+  mutate_at(
+    vars(ae_num, ae_date, ae_portion, ae_vcc_final),
+    funs(as.numeric)
+  ) %>%
   mutate(
     ## Determine days after consent, randomization to merge with daily data
     ae_date = as.Date(ae_date, origin = "1970-1-1"),
     days_since_consent = days_diff(ae_date, date(enroll_time)),
     days_since_randomization = days_diff(ae_date, date(randomization_time)),
+    ## Remove PHI from descriptions of AE
+    ae_description = str_replace_all(
+      ae_description,
+      c("[0-9]+/[0-9]+/[0-9][0-9]" = "xx/xx/xx", ## dates
+        "[0-9][0-9]:*[0-9][0-9]"   = "xx:xx",    ## times
+        " \\(.+\\)"                = "..."       ## v specific info within ()
+      )
+    ),
     ## Indicator for when we merge with daily data
     torsades_ae = TRUE
   )
@@ -252,7 +266,28 @@ torsades_summary_int <- torsades_df %>%
     funs(paste0("ever_", gsub("\\_days\\_ever$", "", .), "_int"))
   )
 
+## Create dataset with pertinent info for AE, redacting PHI; this will be
+## printed in final report
+torsades_events <- torsades_events %>%
+  dplyr::select(id, ae_portion, ae_serious, ae_description) %>%
+  mutate(
+    ae_portion = factor(
+      ae_portion,
+      levels = get_levels_ih("ae_portion_1"),
+      labels = names(get_levels_ih("ae_portion_1"))
+    ),
+    ae_serious = factor(
+      ae_serious,
+      levels = get_levels_ih("ae_serious_1"),
+      labels = names(get_levels_ih("ae_serious_1"))
+    )
+  )
+
 ## -- Combine and save final datasets ------------------------------------------
+## Info on Torsades AEs
+saveRDS(torsades_events, file = "analysisdata/rds/torsadesaes.rds")
+write_csv(torsades_events, path = "analysisdata/csv/torsadesaes.csv")
+
 ## Daily data
 safety_df <- reduce(
   list(
