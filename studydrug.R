@@ -18,13 +18,21 @@ ih_events <- get_events("MINDUSA_IH_TOKEN") %>% mutate(event_num = 1:nrow(.))
 ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
 ## -- Download randomization info ----------------------------------------------
+ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
+
+## Vector of all randomized patients never excluded
+rand_pts <- ptstatus_df %>%
+  filter(randomized & !excluded_ever) %>%
+  pull(id)
+
+## Need randomization time to calculate time to first dose of study drug
 random_raw <- import_df(
   rctoken = "MINDUSA_IH_TOKEN",
   id_field = "id",
-  fields = c("id", "randomized_yn", "randomization_time"),
+  fields = c("id", "randomization_time"),
   events = "enrollment__day_0_arm_1"
 ) %>%
-  filter(randomized_yn == "Yes") %>%
+  filter(id %in% rand_pts) %>%
   mutate(randomization_time = ymd_hm(randomization_time)) %>%
   select(id, randomization_time)
 
@@ -51,16 +59,20 @@ drug_raw <- import_df(
     paste0("decrease_other_", 1:3),
     paste0("permanent_stop_why_", 1:3),
     paste0("permanent_stop_other_", 1:3)
+  ),
+  ## Study drug could not be given on "randomziation" or "prior to d/c" events
+  events = setdiff(
+    ih_events$unique_event_name,
+    c("randomization_arm_1", "prior_to_hospital_arm_1")
   )
 ) %>%
-  ## Study drug could not be given on "randomziation" or "prior to d/c" events
-  filter(!(redcap_event_name %in%
-             c("randomization_arm_1", "prior_to_hospital_arm_1"))) %>%
   ## Rename dose date/time variables
   rename(
     dose_datetime_2 = "dose_datetime_12_16f",
     dose_datetime_3 = "dose_datetime_12_17f"
-  )
+  ) %>%
+  ## Keep only randomized patients
+  filter(id %in% rand_pts)
 
 ## -- assertr checks for raw data ----------------------------------------------
 drug_raw_checks <- drug_raw %>%
@@ -178,9 +190,10 @@ doses_df <- drug_raw %>%
     ),
     
     ## If drug held or discontinued, indicators for why
-    held_qtc = drug_held & dose_held_reason == "QTc Prolongation",
+    held_qtc = drug_held &
+      dose_held_reason == "QTc Prolongation (>=500 ms or >=550 protocol v1.09)",
     held_oversed = drug_held & dose_held_reason == "Oversedation",
-    held_eps = drug_held & dose_held_reason == "Extrapyramidal symptoms",
+    held_eps = drug_held & dose_held_reason == "Extrapyramidal symptoms (EPS)",
     held_dystonia = drug_held & dose_held_reason == "Dystonia",
     held_ae = drug_held & dose_held_reason == "Adverse event",
     held_refuseteam = drug_held & dose_held_reason == "Managing team refused",
@@ -188,9 +201,9 @@ doses_df <- drug_raw %>%
     held_other = drug_held & dose_held_reason == "Other",
     
     permdc_nms = drug_permdc &
-      dose_permdc_reason == "Neuroleptic malignant syndrome",
+      dose_permdc_reason == "Neuroleptic malignant syndrome (NMS)",
     permdc_react = drug_permdc &
-      dose_permdc_reason == "Drug Reaction with Eosinophilia and Systemic Symptoms",
+      dose_permdc_reason == "Drug Reaction with Eosinophilia and Systemic Symptoms (DRESS)",
     permdc_torsades = drug_permdc & dose_permdc_reason == "Torsades de pointes",
     permdc_coma = drug_permdc &
       dose_permdc_reason == "Coma due to a structural brain disease",
