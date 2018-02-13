@@ -74,13 +74,24 @@ drug_raw <- import_df(
   ## Keep only randomized patients
   filter(id %in% rand_pts)
 
+## -- Data management due to protocol violation --------------------------------
+## MOC-028 was given study drug prior to randomization. This is well documented
+## in NTF, IRB submission. Team decided Feb 2018 that this dose should not be
+## considered when describing study drug doses, time between randomization &
+## study drug, etc; easiest to remove this dose from analysis dataset.
+empty_row <- which(
+  drug_raw$id == "MOC-028" &
+    drug_raw$redcap_event_name == "enrollment__day_0_arm_1"
+)
+drug_raw[empty_row, 3:ncol(drug_raw)] <- NA
+
 ## -- assertr checks for raw data ----------------------------------------------
 drug_raw_checks <- drug_raw %>%
   assert(in_set(0:1), matches("^study\\_drug\\_given\\_")) %>%
   assert(within_bounds(0, 700), matches("^pre\\_dose\\_qtc")) %>%
   assert(in_set(c(1:10, 99)), matches("^dose\\_held\\_reason")) %>%
   assert(in_set(1:2), matches("^no\\_dose\\_why")) # %>%
-## PEN-009 used old option; asked coordinators to fix
+  ## PEN-009 used old option; asked coordinators to fix
 # assert(in_set(c(1, 3, 5:13, 99)), matches("^permanent\\_stop\\_why"))
 
 ## -- Create one data set with one record per **study drug dose** --------------
@@ -313,17 +324,19 @@ first_dose <- doses_df %>%
   mutate(
     hrs_random_drug =
       as.numeric(difftime(dose_dttm, randomization_time, unit = "hours"))
-  ) %>%
-  select(id, hrs_random_drug)
+  )
 
-# ## Some have negative hours between randomization and first study drug;
-# ##  write to CSV for checking
-# write_csv(
-#   subset(first_dose,
-#          hrs_random_drug < 0,
-#          select = c(id, randomization_time, dose_dttm, hrs_random_drug)),
-#   path = "datachecks/drug_before_randomization.csv"
-# )
+## Some have negative hours between randomization and first study drug;
+##  write to CSV for checking
+write_csv(
+  subset(first_dose,
+         hrs_random_drug < 0,
+         select = c(id, randomization_time, dose_dttm, hrs_random_drug)),
+  path = "datachecks/drug_before_randomization.csv"
+)
+
+## Keep only ID, hours since randomization
+first_dose <- first_dose %>% dplyr::select(id, hrs_random_drug)
 
 ## Combine days, doses, and discontinuation information; one record per patient
 ptdrug_df <- reduce(
