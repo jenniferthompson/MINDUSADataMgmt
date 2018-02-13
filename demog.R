@@ -157,6 +157,14 @@ ph_form <- demog_raw %>%
   select(id, education, english_level, iqcode_total_ph, adl_total_ph,
          faq_total_ph, audit_total_ph_complete, audit_total_ph_partial)
 
+## Everyone should have an IQCODE
+write_csv(
+  ph_form %>%
+    filter(is.na(iqcode_total_ph)) %>%
+    dplyr::select(id, iqcode_total_ph),
+  path = "datachecks/no_iqcode.csv"
+)
+
 ## -- Demographic/baseline info ------------------------------------------------
 baseline <- demog_raw %>%
   ## Dates/times

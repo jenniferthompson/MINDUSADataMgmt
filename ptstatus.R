@@ -309,7 +309,7 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
 ##           out exclusion 1 (rapidly resolving organ failure) and 9d (72h
 ##           eligibility period exceeded before screening)
 ## Excluded, ever: Screened, and met >=1 exclusion criteria (including IQCODE
-##                 >= 4.5) without being randomized (subset of screened) **** not currently true - YAL-060
+##                 >= 4.5) without being randomized (subset of screened)
 ## Excluded immediately: Screened, and met >=1 exclusion before being consented
 ##                       (no enrollment time)
 ## Excluded later: Screened, consented, and was found to meet >=1 exclusion
@@ -317,11 +317,12 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
 ##                 maintenance antipsychotic use) without being randomized
 ##   excluded immediately + excluded later = excluded ever
 ## Approached: Screened, not immediately excluded
-##             (excluded imm. + approached = screened; **** not currently true - MON-071)
+##             (excluded imm. + approached = screened)
 ## Refused: Screened, approached, & pt/surrogate approached but refused consent
 ##          (subset of approached)
 ## Consented: Screened/approached, no refusal, enrollment date recorded
-##            (refused + consent = approached) **** not currently true d/t 44 patients with no exclusion; currently approached, but neither consented nor randomized
+##            (refused + consent = approached)
+##  **** not currently true d/t 27 patients with no exclusion; currently approached, but neither consented nor randomized
 ##
 ## Randomization + study drug:
 ## Disqualified: Consented, but not randomized + disqualification date
@@ -329,9 +330,6 @@ ptstatus_df <- bind_rows(exc_df, inhosp_df) %>%
 ##             (disqualified + randomized = consented)
 ## Ever excluded + refused + randomized + disqualified = screened
 ## **** not currently true; recheck this after those no-exclusion patients are handled ****
-## Received study drug: Randomized and received at least one dose of study drug
-## Did not receive study drug: Randomized, but never received a dose of s. drug
-##   (subset of randomized) **** not currently true; MON-071
 ##
 ## End of in-hospital phase:
 ## Eligible for followup: Randomized + discharged alive from hospital, with no
@@ -407,27 +405,27 @@ ptstatus_df <- ptstatus_df %>%
     
     ## Randomization vs disqualification
     ## Disqualified: screened, approached, did not refuse, consented,
-    ##   not randomized + DQ time entered
+    ##   never excluded, not randomized + DQ time entered
     disqualified = screened & approached & !refused & !excluded_ever &
       consented & !randomized_yn & !is.na(disqualification_time),
     ## Randomized: screened, approached, did not refuse, consented,
     ##   randomized + time recorded
-    randomized = screened & approached & !refused & consented &
+    randomized = screened & approached & !refused & consented & !excluded_ever &
       randomized_yn & !is.na(randomization_time),
     
-    ## End of in-hospital phase
+    ## End of in-hospital phase (patients must be randomized, never excluded)
     ## Died in hospital: randomized + died + died prior to hospital discharge
     ## Followup deaths are recorded in this database, so need to differentiate
-    died_inhosp = randomized &
+    died_inhosp = randomized & !excluded_ever &
       death == 1 & !is.na(death_time) &
       (is.na(hospdis_time) | death_time <= hospdis_time),
     
     ## Withdrew in hospital: randomized + withdrew + w/d date prior to discharge
-    wd_inhosp = randomized &
+    wd_inhosp = randomized & !excluded_ever &
       studywd == 1 & !is.na(studywd_date) &
       (is.na(hospdis_date) | studywd_date <= hospdis_date),
     
-    ## Patients can both die and withdraw in-hospital
+    ## **Patients can both die and withdraw in-hospital**
     
     ## Eligible for followup: randomized, survived hospital stay, no withdrawal
     elig_fu = randomized & !died_inhosp & !wd_inhosp & hospdis == 1,
@@ -483,19 +481,19 @@ test_df <- ptstatus_df %>%
     exc_none = screened & !excluded_ever & !refused & !consented
   )
 
-# ## No one should have 0 exclusions checked. Write a subset of these IDs to CSV
-# write_csv(
-#   subset(test_df,
-#          exc_none,
-#          select = c(id, study_site, exc_date, exc_other, exc_notes)),
-#   path = "no_exclusions.csv"
-# )
+## No one should have 0 exclusions checked. Write a subset of these IDs to CSV
+write_csv(
+  subset(test_df,
+         exc_none,
+         select = c(id, study_site, exc_date, exc_other, exc_notes)),
+  path = "datachecks/no_exclusions.csv"
+)
 
-# ## List all exclusions due to "other" in randomization qualification form
-# write_csv(
-#   x = subset(randqual_raw, exc_99_other == 1, select = c(id, exc_other)),
-#   path = "randqual_otherexc.csv"
-# )
+## List all exclusions due to "other" in randomization qualification form
+write_csv(
+  x = subset(randqual_raw, exc_99_other == 1, select = c(id, exc_other)),
+  path = "datachecks/randqual_otherexc.csv"
+)
 
 ## Summarize % of exclusions
 main_exclusions <- c(
@@ -607,7 +605,7 @@ cat(
 
 cat(
   glue(
-    "End of In-Hospital Phase\n",
+    "\n\n\nEnd of In-Hospital Phase\n",
     "Total patients randomized: {sum_na(ptstatus_df$randomized)}",
     "  Died in hospital: {sum_na(ptstatus_df$dc_status == 'Died in hospital')}",
     "  Withdrew in hospital: {sum_na(ptstatus_df$dc_status == 'Withdrew in hospital')}",

@@ -376,42 +376,42 @@ mv_summary <- reduce(
   ) %>%
   select(-randomization_time, -last_inhosp_time)
 
-# ## -- Data checks: randomization qualification form vs dates tracking ----------
-# ## How many patients were on either form of MV at randomization?
-# mv_random <- mv_dates %>%
-#   filter(mv_start <= randomization_time & mv_stop_final > randomization_time) %>%
-#   add_count(id) ## UNC-044 has overlapping invasive/NIPPV times; sent to BP/EH
-# 
-# ## Cross-check this with checkbox of organ failures at randomization
-# mv_random <- mv_random %>%
-#   left_join(select(ptstatus_df, id, rand_mv, rand_nippv), by = "id")
-# 
-# ## Calculate time between randomization and first initiation of MV
-# first_mv_random <- mv_dates %>%
-#   arrange(id, mv_start) %>%
-#   group_by(id) %>%
-#   slice(1) %>%
-#   mutate(
-#     days_mv_rand =
-#       as.numeric(difftime(mv_start, randomization_time, units = "days"))
-#   ) %>%
-#   left_join(select(ptstatus_df, id, rand_mv, rand_nippv))
-# 
-# ## How many patients on MV at randomization did not have either MV-related
-# ##   organ failure marked on RQ form?
-# 
-# ggplot(data = mv_dates, aes(x = mv_days_postrand)) +
-#   geom_histogram(binwidth = 1) +
-#   geom_vline(xintercept = 0, color = "red") +
-#   labs(title = "Days between Randomization and Initiation of MV,\nAll Patients Who Had MV")
-# 
-# ggplot(data = subset(first_mv_random, mv_start > randomization_time),
-#        aes(x = days_mv_rand)) +
-#   geom_histogram(binwidth = 1) +
-#   labs(title = "Days between Randomization and First Initiation of MV,\nPatients Who Started MV after Randomization")
-# 
-# subset(first_mv_random, mv_start <= randomization_time & !(rand_mv | rand_nippv)) %>% 
-#   write_csv(path = "datachecks/rand_onmv_noorgfailure.csv")
+## -- Data checks: randomization qualification form vs dates tracking ----------
+## How many patients were on either form of MV at randomization?
+mv_random <- mv_dates %>%
+  filter(mv_start <= randomization_time & mv_stop_final > randomization_time) %>%
+  add_count(id) ## UNC-044 has overlapping invasive/NIPPV times; sent to BP/EH
+
+## Cross-check this with checkbox of organ failures at randomization
+mv_random <- mv_random %>%
+  left_join(select(ptstatus_df, id, rand_mv, rand_nippv), by = "id")
+
+## Calculate time between randomization and first initiation of MV
+first_mv_random <- mv_dates %>%
+  arrange(id, mv_start) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  mutate(
+    days_mv_rand =
+      as.numeric(difftime(mv_start, randomization_time, units = "days"))
+  ) %>%
+  left_join(select(ptstatus_df, id, rand_mv, rand_nippv))
+
+## How many patients on MV at randomization did not have either MV-related
+##   organ failure marked on RQ form?
+
+ggplot(data = mv_dates, aes(x = mv_days_postrand)) +
+  geom_histogram(binwidth = 1) +
+  geom_vline(xintercept = 0, color = "red") +
+  labs(title = "Days between Randomization and Initiation of MV,\nAll Patients Who Had MV")
+
+ggplot(data = subset(first_mv_random, mv_start > randomization_time),
+       aes(x = days_mv_rand)) +
+  geom_histogram(binwidth = 1) +
+  labs(title = "Days between Randomization and First Initiation of MV,\nPatients Who Started MV after Randomization")
+
+subset(first_mv_random, mv_start <= randomization_time & !(rand_mv | rand_nippv)) %>%
+  write_csv(path = "datachecks/rand_onmv_noorgfailure.csv")
 
 ## -- ICU length of stay -------------------------------------------------------
 ## Total ICU LOS = sum of all individual ICU admissions. If patient has no ICU
