@@ -412,6 +412,9 @@ ggplot(data = subset(first_mv_random, mv_start > randomization_time),
 
 subset(first_mv_random, mv_start <= randomization_time & !(rand_mv | rand_nippv)) %>%
   write_csv(path = "datachecks/rand_onmv_noorgfailure.csv")
+## Note: MOC-034 shows up in this check but is confirmed OK Feb 2018; this was a
+## combimation of unusual circumstances + study definition of extubation (48h).
+## See event reporting form for details.
 
 ## -- ICU length of stay -------------------------------------------------------
 ## Total ICU LOS = sum of all individual ICU admissions. If patient has no ICU
