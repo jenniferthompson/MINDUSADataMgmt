@@ -522,15 +522,22 @@ datestrack_df <- reduce(
   mutate(
     ## Thanks to A+ followup team, we can be pretty certain that if a patient
     ## died, the date will be entered, provided we had permission to access PHI.
+      ## One known exception (VAN-278): family member could not remember exact
+      ## date of death & team couldn't find obituary. At end of study, we'll
+      ## find it using SSDI. We know that it was >30 days after randomization,
+      ## and account for that here.
     ## is.na(death) included for patients who withdrew in the hospital with no
     ## PHI access permitted; these should be censored at time of withdrawal.
     tte_death_30 = case_when(
-      is.na(hosp_los)                             ~ as.numeric(NA),
+      ## Special case as noted above:
+      ##  VAN-278 known to have died > day 30, no death date currently available
+      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ 31,
+      is.na(hosp_los)                                      ~ as.numeric(NA),
       (is.na(death) | death == "Yes") &
-        is.na(daysto_death) & hosp_los <= 30      ~ hosp_los,
+        is.na(daysto_death) & hosp_los <= 30               ~ hosp_los,
       (is.na(death) | death == "Yes") &
-        !is.na(daysto_death) & daysto_death <= 30 ~ daysto_death,
-      TRUE                                        ~ 31
+        !is.na(daysto_death) & daysto_death <= 30          ~ daysto_death,
+      TRUE                                                 ~ 31
     ),
     event_death_30 = case_when(
       death == "Yes" & daysto_death <= 30 ~ TRUE,
