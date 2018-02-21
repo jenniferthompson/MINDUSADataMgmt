@@ -553,6 +553,15 @@ datestrack_df <- reduce(
       ever_mvlib & daysto_mvlib_all <= 30 ~ TRUE,
       TRUE                                ~ FALSE
     ),
+    ftype_mvlib_30 = factor(
+      case_when(
+        !on_mv_rand24  ~ as.numeric(NA),
+        event_mvlib_30 ~ 1,
+        event_death_30 ~ 2,
+        TRUE           ~ 0
+      ),
+      levels = 0:2, labels = c("Censored", "MV Liberation", "Death")
+    ),
     tte_icudis_30 = case_when(
       is.na(daysto_icudis_all) ~ as.numeric(NA),
       daysto_icudis_all <= 30  ~ daysto_icudis_all,
@@ -561,6 +570,14 @@ datestrack_df <- reduce(
     event_icudis_30 = case_when(
       icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
       TRUE                                           ~ FALSE
+    ),
+    ftype_icudis_30 = factor(
+      case_when(
+        event_icudis_30 ~ 1,
+        event_death_30  ~ 2,
+        TRUE            ~ 0
+      ),
+      levels = 0:2, labels = c("Censored", "ICU Discharge", "Death")
     )
   ) %>%
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
@@ -574,7 +591,7 @@ datestrack_df <- reduce(
          studywd, daysto_wd, studywd_ih, daysto_wd_ih,
          studywd_person:studywd_writing_other,
          death, death_wdtrt, daysto_death, death_ih, daysto_death_ih,
-         matches("^tte|event"))
+         matches("^tte|event|ftype"))
 
 saveRDS(datestrack_df, file = "analysisdata/rds/datestrack.rds")
 write_csv(datestrack_df, path = "analysisdata/csv/datestrack.csv")
