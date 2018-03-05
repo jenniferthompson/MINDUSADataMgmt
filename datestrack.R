@@ -425,6 +425,7 @@ icu_dates <- dates_df %>%
          randomization_time,
          last_inhosp_time,
          death_time,
+         studywd_time,
          matches("^icuadm\\_[1-6]\\_time$"),
          matches("^icudis\\_[1-6]\\_time$")) %>%
   
@@ -460,7 +461,8 @@ icu_dates <- dates_df %>%
                      days_diff(icu_dis_final, randomization_time),
                      days_diff(icu_dis_final, icu_adm)),
     icudis_succ =
-      !(!is.na(death_time) & days_diff(death_time, icu_dis_final) <= 2)
+      !((!is.na(death_time) & days_diff(death_time, icu_dis_final) <= 2) |
+          (!is.na(studywd_time) & is.na(icu_dis)))
   )
   
 ## CSV of negative ICU LOSes
@@ -578,6 +580,23 @@ datestrack_df <- reduce(
         TRUE            ~ 0
       ),
       levels = 0:2, labels = c("Censored", "ICU Discharge", "Death")
+    ),
+    tte_hospdis_30 = case_when(
+      is.na(hosp_los) ~ as.numeric(NA),
+      hosp_los <= 30  ~ hosp_los,
+      TRUE            ~ 31
+    ),
+    event_hospdis_30 = case_when(
+      hospdis == "Yes" & hosp_los <= 30 ~ TRUE,
+      TRUE                              ~ FALSE
+    ),
+    ftype_hospdis_30 = factor(
+      case_when(
+        event_hospdis_30 ~ 1,
+        event_death_30   ~ 2,
+        TRUE             ~ 0
+      ),
+      levels = 0:2, labels = c("Censored", "Hospital Discharge", "Death")
     )
   ) %>%
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
