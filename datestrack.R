@@ -247,7 +247,10 @@ mv_dates <- dates_df %>%
   
   ## Add enrollment, randomization, death, last in-hospital times
   left_join(
-    select(dates_df, id, randomization_time, death_time, last_inhosp_time),
+    dplyr::select(
+      dates_df,
+      id, randomization_time, hospdis_noinfo, death_time, last_inhosp_time
+    ),
     by = "id"
   ) %>%
   
@@ -312,7 +315,11 @@ mv_dates <- dates_df %>%
     ## Indicator for whether discontinuation was "successful"
     ##  (MV actually discontinued, and >48 hours between discontinuation and
     ##   either reinitiation or death)
-    mv_dc_success = !is.na(mv_stop) & time_off_mv > 2
+    mv_dc_success = ifelse(
+      ## If no discharge or death info is available, we don't know
+      hospdis_noinfo, NA,
+      !is.na(mv_stop) & time_off_mv > 2
+    )
   )
 
 ## -- Summarize each patient's MV experience -----------------------------------
@@ -424,6 +431,7 @@ subset(first_mv_random, mv_start <= randomization_time & !(rand_mv | rand_nippv)
 ## start the "clock" at randomization, not ICU admission.
 icu_dates <- dates_df %>%
   select(id,
+         hospdis_noinfo,
          randomization_time,
          last_inhosp_time,
          death_time,
@@ -462,9 +470,13 @@ icu_dates <- dates_df %>%
     icu_los = ifelse(randomization_time > icu_adm,
                      days_diff(icu_dis_final, randomization_time),
                      days_diff(icu_dis_final, icu_adm)),
-    icudis_succ =
+    icudis_succ = ifelse(
+      ## If patient has no discharge or death info, we don't know if it was
+      ##  successful
+      hospdis_noinfo, NA,
       !((!is.na(death_time) & days_diff(death_time, icu_dis_final) <= 2) |
           (!is.na(studywd_time) & is.na(icu_dis)))
+    )
   )
   
 ## CSV of negative ICU LOSes
@@ -572,7 +584,7 @@ datestrack_df <- reduce(
       TRUE                     ~ 31
     ),
     event_icudis_30 = case_when(
-      icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
+      !is.na(icudis_succ) & icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
       TRUE                                           ~ FALSE
     ),
     ftype_icudis_30 = factor(
