@@ -60,11 +60,10 @@ dates_df <- dates_raw %>%
   ## database, it appears that study staff were asked not to access PHI,
   ## formally or informally
   mutate(
-    withdrew_bothno = id %in% rand_pts & death == 0 & hospdis == 0,
-    death = ifelse(withdrew_bothno, NA, death),
-    hospdis = ifelse(withdrew_bothno, NA, hospdis)
-  ) %>%
-  dplyr::select(-withdrew_bothno)
+    hospdis_noinfo = id %in% rand_pts & death == 0 & hospdis == 0,
+    death = ifelse(hospdis_noinfo, NA, death),
+    hospdis = ifelse(hospdis_noinfo, NA, hospdis)
+  )
 
 ## -- Find "last in-hospital" date/time: ---------------------------------------
 ## If hospital discharge available, use that
@@ -100,6 +99,19 @@ dates_df <- dates_df %>%
 ## Time to stroke among those who had one
 ## Time to trach among those trached
 dates_df <- dates_df %>%
+  ## Rename study withdrawal levels, coenrollment studies
+  rename(
+    studywd_writing_further  = "studywd_writing_1",
+    studywd_writing_phi      = "studywd_writing_2",
+    studywd_writing_data     = "studywd_writing_3",
+    studywd_writing_blood    = "studywd_writing_4",
+    studywd_writing_otherreq = "studywd_writing_5", ## _other already taken
+    coenroll_sails      = "coenroll_0",
+    coenroll_aki        = "coenroll_1",
+    coenroll_citrulline = "coenroll_2",
+    coenroll_tylenol    = "coenroll_3",
+    coenroll_balance    = "coenroll_4"
+  ) %>%
   mutate(
     days_hospadm_enroll = days_diff(enroll_time, hospadm_time),
     days_hospadm_rand   = days_diff(randomization_time, hospadm_time),
@@ -139,8 +151,11 @@ dates_df <- dates_df %>%
     ##   withdrawal date on/before hospital discharge date
     studywd_ih = factor(
       as.numeric(
-        studywd == 1 &
-          (hospdis == 0 | date(studywd_time) <= date(hospdis_time))
+        studywd == 1 & (
+          hospdis_noinfo | ## pts who withdrew PHI access
+            hospdis == 0 |  ## pts who were not discharged
+            date(studywd_time) <= date(hospdis_time) ## discharged after w/d
+        )
       ),
       levels = 0:1, labels = c("No", "Yes")
     ),
@@ -160,19 +175,6 @@ dates_df <- dates_df %>%
     liver_tx       = make_factor_ih(., "liver_tx"),
     ## Total instances of either type of MV
     mv_num = int_num + noninv_num
-  ) %>%
-  ## Rename study withdrawal levels, coenrollment studies
-  rename(
-    studywd_writing_further  = "studywd_writing_1",
-    studywd_writing_phi      = "studywd_writing_2",
-    studywd_writing_data     = "studywd_writing_3",
-    studywd_writing_blood    = "studywd_writing_4",
-    studywd_writing_otherreq = "studywd_writing_5", ## _other already taken
-    coenroll_sails      = "coenroll_0",
-    coenroll_aki        = "coenroll_1",
-    coenroll_citrulline = "coenroll_2",
-    coenroll_tylenol    = "coenroll_3",
-    coenroll_balance    = "coenroll_4"
   )
 
 ## CSV of times that look weird
@@ -505,7 +507,7 @@ datestrack_df <- reduce(
         int_num, noninv_num, mv_num, icu_readmit_number,
         death, death_wdtrt, death_summary, daysto_death,
         death_ih, daysto_death_ih,
-        studywd, studywd_ih, studywd_person:studywd_writing_other,
+        studywd, studywd_ih, hospdis_noinfo, studywd_person:studywd_writing_other,
         daysto_wd, daysto_wd_ih,
         hospdis, hospdis_loc, hospdis_loc_other, hospdis_vent,
         hosp_los, daysto_hospdis
@@ -607,7 +609,7 @@ datestrack_df <- reduce(
          icu_readmit_number, icu_los, icudis_succ, daysto_icudis_all,
          daysto_icudis_exp,
          hosp_los, hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
-         studywd, daysto_wd, studywd_ih, daysto_wd_ih,
+         studywd, daysto_wd, studywd_ih, hospdis_noinfo, daysto_wd_ih,
          studywd_person:studywd_writing_other,
          death, death_wdtrt, daysto_death, death_ih, daysto_death_ih,
          matches("^tte|event|ftype"))
