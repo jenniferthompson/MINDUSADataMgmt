@@ -159,6 +159,25 @@ dates_df <- dates_df %>%
       ),
       levels = 0:1, labels = c("No", "Yes")
     ),
+    ## Was hospital discharge "successful" (followed by >=48h alive)?
+    hospdis_succ = factor(
+      case_when(
+        is.na(hospdis) | (hospdis == 1 & is.na(hospdis_time)) ~ as.numeric(NA),
+        is.na(hospdis_time) ~ 0,
+        is.na(death_time) ~ 1,
+        as.numeric(difftime(death_time, hospdis_time, units = "hours")) >= 0 &
+          as.numeric(difftime(death_time, hospdis_time, units = "hours")) <= 48
+        ~ 0,
+        TRUE ~ 1
+      ),
+      levels = 0:1, labels = c("No", "Yes")
+    ),
+    ## Time to successful discharge among exposed
+    daysto_hospdis_succ = case_when(
+      !is.na(hospdis_succ) & hospdis_succ == "Yes" ~ hosp_los,
+      TRUE                                         ~ as.numeric(NA)
+    ),
+    
     death          = make_factor_ih(., "death"),
     death_wdtrt    = make_factor_ih(., "death_wdtrt"),
     studywd        = make_factor_ih(., "studywd"),
@@ -194,7 +213,8 @@ subset(dates_df,
 
 ## -- Create dataset of all instances of MV after/including randomization ------
 ## One record per instance; final dataset includes:
-## - Dates/times of randomization, death, last in-hospital contact (discharge, death, or withdrawal)
+## - Dates/times of randomization, death, last in-hospital contact
+##     (discharge, death, or withdrawal)
 ## - Instance (eg, "invasive_1"); mv_instance
 ## - Actual start/stop time; mv_start, mv_stop
 ## - "Final" stop time - meaning, if patient was not officially discontinued,
@@ -521,8 +541,8 @@ datestrack_df <- reduce(
         death_ih, daysto_death_ih,
         studywd, studywd_ih, hospdis_noinfo, studywd_person:studywd_writing_other,
         daysto_wd, daysto_wd_ih,
-        hospdis, hospdis_loc, hospdis_loc_other, hospdis_vent,
-        hosp_los, daysto_hospdis
+        hospdis, hospdis_succ, hospdis_loc, hospdis_loc_other, hospdis_vent,
+        hosp_los, daysto_hospdis, daysto_hospdis_succ
       )
     ),
     mv_summary,
@@ -535,6 +555,7 @@ datestrack_df <- reduce(
 ) %>%
   ## Create time-to-event variables, cut off or censored at a given time point
   ## In-hospital outcomes all cut off at 30 days
+  ## "Successful" ICU or hospital discharge is followed by 48 hours alive.
   mutate(
     ## Thanks to A+ followup team, we can be pretty certain that if a patient
     ## died, the date will be entered, provided we had permission to access PHI.
@@ -547,13 +568,13 @@ datestrack_df <- reduce(
     tte_death_30 = case_when(
       ## Special case as noted above:
       ##  VAN-278 known to have died > day 30, no death date currently available
-      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ 31,
+      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ 30.1,
       is.na(hosp_los)                                      ~ as.numeric(NA),
       (is.na(death) | death == "Yes") &
         is.na(daysto_death) & hosp_los <= 30               ~ hosp_los,
       (is.na(death) | death == "Yes") &
         !is.na(daysto_death) & daysto_death <= 30          ~ daysto_death,
-      TRUE                                                 ~ 31
+      TRUE                                                 ~ 30.1
     ),
     event_death_30 = case_when(
       death == "Yes" & daysto_death <= 30 ~ TRUE,
@@ -562,7 +583,7 @@ datestrack_df <- reduce(
     tte_mvlib_30 = case_when(
       !on_mv_rand24 | is.na(daysto_mvlib_all) ~ as.numeric(NA),
       daysto_mvlib_all <= 30                  ~ daysto_mvlib_all,
-      TRUE                                    ~ 31
+      TRUE                                    ~ 30.1
     ),
     event_mvlib_30 = case_when(
       !on_mv_rand24                       ~ as.logical(NA),
@@ -581,7 +602,7 @@ datestrack_df <- reduce(
     tte_icudis_30 = case_when(
       is.na(daysto_icudis_all) ~ as.numeric(NA),
       daysto_icudis_all <= 30  ~ daysto_icudis_all,
-      TRUE                     ~ 31
+      TRUE                     ~ 30.1
     ),
     event_icudis_30 = case_when(
       !is.na(icudis_succ) & icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
@@ -597,12 +618,12 @@ datestrack_df <- reduce(
     ),
     tte_hospdis_30 = case_when(
       is.na(hosp_los) ~ as.numeric(NA),
-      hosp_los <= 30  ~ hosp_los,
-      TRUE            ~ 31
+      daysto_hospdis_succ <= 30 ~ daysto_hospdis_succ,
+      TRUE            ~ 30.1
     ),
     event_hospdis_30 = case_when(
-      hospdis == "Yes" & hosp_los <= 30 ~ TRUE,
-      TRUE                              ~ FALSE
+      hospdis_succ == "Yes" & daysto_hospdis_succ <= 30 ~ TRUE,
+      TRUE                                              ~ FALSE
     ),
     ftype_hospdis_30 = factor(
       case_when(
@@ -620,7 +641,8 @@ datestrack_df <- reduce(
          daysto_mvlib_exp, daysto_mvlib_all,
          icu_readmit_number, icu_los, icudis_succ, daysto_icudis_all,
          daysto_icudis_exp,
-         hosp_los, hospdis, daysto_hospdis, hospdis_loc:hospdis_vent,
+         hosp_los, hospdis, daysto_hospdis, hospdis_succ, daysto_hospdis_succ,
+         hospdis_loc:hospdis_vent,
          studywd, daysto_wd, studywd_ih, hospdis_noinfo, daysto_wd_ih,
          studywd_person:studywd_writing_other,
          death, death_wdtrt, daysto_death, death_ih, daysto_death_ih,
