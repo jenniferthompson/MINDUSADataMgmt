@@ -10,6 +10,9 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
+## When to censor in-hospital outcomes? Cutoff = 30 days
+censor_ih <- 30.01
+
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
 ih_dd <- get_datadict("MINDUSA_IH_TOKEN")
@@ -568,13 +571,13 @@ datestrack_df <- reduce(
     tte_death_30 = case_when(
       ## Special case as noted above:
       ##  VAN-278 known to have died > day 30, no death date currently available
-      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ 30.1,
+      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ censor_ih,
       is.na(hosp_los)                                      ~ as.numeric(NA),
       (is.na(death) | death == "Yes") &
         is.na(daysto_death) & hosp_los <= 30               ~ hosp_los,
       (is.na(death) | death == "Yes") &
         !is.na(daysto_death) & daysto_death <= 30          ~ daysto_death,
-      TRUE                                                 ~ 30.1
+      TRUE                                                 ~ censor_ih
     ),
     event_death_30 = case_when(
       death == "Yes" & daysto_death <= 30 ~ TRUE,
@@ -583,7 +586,7 @@ datestrack_df <- reduce(
     tte_mvlib_30 = case_when(
       !on_mv_rand24 | is.na(daysto_mvlib_all) ~ as.numeric(NA),
       daysto_mvlib_all <= 30                  ~ daysto_mvlib_all,
-      TRUE                                    ~ 30.1
+      TRUE                                    ~ censor_ih
     ),
     event_mvlib_30 = case_when(
       !on_mv_rand24                       ~ as.logical(NA),
@@ -602,7 +605,7 @@ datestrack_df <- reduce(
     tte_icudis_30 = case_when(
       is.na(daysto_icudis_all) ~ as.numeric(NA),
       daysto_icudis_all <= 30  ~ daysto_icudis_all,
-      TRUE                     ~ 30.1
+      TRUE                     ~ censor_ih
     ),
     event_icudis_30 = case_when(
       !is.na(icudis_succ) & icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
@@ -617,9 +620,10 @@ datestrack_df <- reduce(
       levels = 0:2, labels = c("Censored", "ICU Discharge", "Death")
     ),
     tte_hospdis_30 = case_when(
-      is.na(hosp_los) ~ as.numeric(NA),
+      is.na(hosp_los)           ~ as.numeric(NA),
       daysto_hospdis_succ <= 30 ~ daysto_hospdis_succ,
-      TRUE            ~ 30.1
+      hosp_los <= 30            ~ hosp_los,
+      TRUE                      ~ censor_ih
     ),
     event_hospdis_30 = case_when(
       hospdis_succ == "Yes" & daysto_hospdis_succ <= 30 ~ TRUE,
