@@ -273,3 +273,15 @@ impute_closest <- function(
   ## Return final value
   x
 }
+
+## Redact PHI from a character string (eg, descriptions of AEs, or reasons for
+## study drug hold)
+remove_phi <- function(x){
+  stringr::str_replace_all(
+    x,
+    c("[0-9]+/[0-9]+/[0-9][0-9]" = "xx/xx/xx", ## dates
+      "[0-9][0-9]:*[0-9][0-9]"   = "xx:xx",    ## times
+      " \\(.+\\)"                = "..."       ## highly specific info within ()
+    )
+  )
+} 

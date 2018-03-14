@@ -193,13 +193,7 @@ torsades_events <- ae_raw %>%
     days_since_consent = days_diff(ae_date, date(enroll_time)),
     days_since_randomization = days_diff(ae_date, date(randomization_time)),
     ## Remove PHI from descriptions of AE
-    ae_description = str_replace_all(
-      ae_description,
-      c("[0-9]+/[0-9]+/[0-9][0-9]" = "xx/xx/xx", ## dates
-        "[0-9][0-9]:*[0-9][0-9]"   = "xx:xx",    ## times
-        " \\(.+\\)"                = "..."       ## v specific info within ()
-      )
-    ),
+    ae_description = remove_phi(ae_description),
     ## Indicator for when we merge with daily data
     torsades_ae = TRUE
   )
