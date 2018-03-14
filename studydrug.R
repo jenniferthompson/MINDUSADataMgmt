@@ -211,6 +211,10 @@ doses_df <- drug_raw %>%
     held_refuseptfam = drug_held & dose_held_reason == "Patient/family refused",
     held_other = drug_held & dose_held_reason == "Other",
     
+    ## Remove PHI from reason for "other" study drug hold, permanent discont
+    held_other_exp = trimws(remove_phi(held_other_exp)),
+    permdc_other_exp = trimws(remove_phi(permdc_other_exp)),
+    
     permdc_nms = drug_permdc &
       dose_permdc_reason == "Neuroleptic malignant syndrome (NMS)",
     permdc_react = drug_permdc &
@@ -238,7 +242,6 @@ doses_df <- drug_raw %>%
     drug_permdc, dose_permdc_reason, matches("^permdc\\_[a-z]+$"),
     permdc_other_exp
   )
-
 
 ## -- Create one data set with one record per **patient**, summarizing ---------
 ## -- doses, holds, discontinuation --------------------------------------------

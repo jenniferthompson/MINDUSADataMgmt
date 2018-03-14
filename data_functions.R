@@ -279,9 +279,18 @@ impute_closest <- function(
 remove_phi <- function(x){
   stringr::str_replace_all(
     x,
-    c("[0-9]+/[0-9]+/[0-9][0-9]" = "xx/xx/xx", ## dates
-      "[0-9][0-9]:*[0-9][0-9]"   = "xx:xx",    ## times
-      " \\(.+\\)"                = "..."       ## highly specific info within ()
+    c(
+      ## Dates
+      "[0-9]+[/|-][0-9]+([/|-][0-9][0-9][0-9]*)*" = "xx/xx/xx",
+      ## Times
+      ## 1) xx:xx format
+      ## 2) xxxx format
+      ## 3) xx[:xx][a/p]m format
+      "[0-9]+:[0-9][0-9]" = "xx:xx",
+      "[0-9][0-9][0-9][0-9]" = "xx:xx",
+      "[0-9]+[ |:]*[0-9]*(?=[a|A|p|P]\\.*[ |m|M|.])" = "xx",
+      ## Highly specific info, often included in parentheses
+      " \\(.+\\)"                = "..."
     )
   )
 } 
