@@ -639,7 +639,9 @@ ptstatus_df <- ptstatus_df %>%
          rand_mv, rand_nippv, rand_shock,
          disqualified, randomized_no_reason,
          died_inhosp, wd_inhosp, elig_fu, dc_status) %>%
-  rename(dq_reason = "randomized_no_reason")
+  rename(dq_reason = "randomized_no_reason") %>%
+  ## Remove PHI from "other" exclusion reason description
+  mutate(exc_other = remove_phi(exc_other))
 
 saveRDS(ptstatus_df, file = "analysisdata/rds/ptstatus.rds")
 write_csv(ptstatus_df, path = "analysisdata/csv/ptstatus.csv")

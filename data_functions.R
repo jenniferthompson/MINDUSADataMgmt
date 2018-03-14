@@ -287,7 +287,7 @@ remove_phi <- function(x){
       ## 2) xxxx format
       ## 3) xx[:xx][a/p]m format
       "[0-9]+:[0-9][0-9]" = "xx:xx",
-      "[0-9][0-9][0-9][0-9]" = "xx:xx",
+      "(?<![A-Z][A-Z][A-Z]-)[0-9][0-9][0-9][0-9]" = "xx:xx",
       "[0-9]+[ |:]*[0-9]*(?=[a|A|p|P]\\.*[ |m|M|.])" = "xx",
       ## Highly specific info, often included in parentheses
       " \\(.+\\)"                = "..."
