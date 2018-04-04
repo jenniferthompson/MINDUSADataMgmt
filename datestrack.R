@@ -10,8 +10,10 @@ library(assertr)
 ## Source data management functions
 source("data_functions.R")
 
-## When to censor in-hospital outcomes? Cutoff = 30 days
-censor_ih <- 30.01
+## When to censor time-to-event outcomes for each time frame
+censor_14 <- 14.01
+censor_30 <- 30.01
+censor_90 <- 90.01
 
 ## -- Import data dictionaries from REDCap -------------------------------------
 ## All tokens are stored in .Renviron
@@ -500,8 +502,21 @@ icu_dates <- dates_df %>%
       !((!is.na(death_time) & days_diff(death_time, icu_dis_final) <= 2) |
           (!is.na(studywd_time) & is.na(icu_dis)))
     )
-  )
-  
+  ) %>%
+  ## Add date/time of *next* ICU admission, if applicable (NA otherwise)
+  arrange(id, icu_adm) %>%
+  group_by(id) %>%
+  mutate(
+    icu_adm_next = lead(icu_adm),
+    time_on_floor = case_when(
+      !is.na(icu_adm_next) ~ as.numeric(
+        difftime(icu_adm_next, icu_dis, units = "days")
+      ),
+      TRUE ~ as.numeric(NA)
+    )
+  ) %>%
+  ungroup()
+
 ## CSV of negative ICU LOSes
 subset(icu_dates, icu_los < 0) %>%
   write_csv(path = "datachecks/icudate_errors.csv")
@@ -571,68 +586,83 @@ datestrack_df <- reduce(
     tte_death_30 = case_when(
       ## Special case as noted above:
       ##  VAN-278 known to have died > day 30, no death date currently available
-      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ censor_ih,
+      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ censor_30,
       is.na(hosp_los)                                      ~ as.numeric(NA),
       (is.na(death) | death == "Yes") &
         is.na(daysto_death) & hosp_los <= 30               ~ hosp_los,
       (is.na(death) | death == "Yes") &
         !is.na(daysto_death) & daysto_death <= 30          ~ daysto_death,
-      TRUE                                                 ~ censor_ih
+      TRUE                                                 ~ censor_30
     ),
     event_death_30 = case_when(
       death == "Yes" & daysto_death <= 30 ~ TRUE,
       TRUE                                ~ FALSE
     ),
-    tte_mvlib_30 = case_when(
-      !on_mv_rand24 | is.na(daysto_mvlib_all) ~ as.numeric(NA),
-      daysto_mvlib_all <= 30                  ~ daysto_mvlib_all,
-      TRUE                                    ~ censor_ih
+    tte_death_90 = case_when(
+      ## Special case as noted above:
+      ##  VAN-278 known to have died > day 30, no death date currently available
+      !is.na(death) & death == "Yes" & is.na(daysto_death) ~ censor_90,
+      is.na(hosp_los)                                      ~ as.numeric(NA),
+      (is.na(death) | death == "Yes") &
+        is.na(daysto_death) & hosp_los <= 90               ~ hosp_los,
+      (is.na(death) | death == "Yes") &
+        !is.na(daysto_death) & daysto_death <= 90          ~ daysto_death,
+      TRUE                                                 ~ censor_90
     ),
-    event_mvlib_30 = case_when(
-      !on_mv_rand24                       ~ as.logical(NA),
-      ever_mvlib & daysto_mvlib_all <= 30 ~ TRUE,
+    event_death_90 = case_when(
+      death == "Yes" & daysto_death <= 90 ~ TRUE,
       TRUE                                ~ FALSE
     ),
-    ftype_mvlib_30 = factor(
+    tte_mvlib_14 = case_when(
+      !on_mv_rand24 | is.na(daysto_mvlib_all) ~ as.numeric(NA),
+      daysto_mvlib_all <= 14                  ~ daysto_mvlib_all,
+      TRUE                                    ~ censor_14
+    ),
+    event_mvlib_14 = case_when(
+      !on_mv_rand24                       ~ as.logical(NA),
+      ever_mvlib & daysto_mvlib_all <= 14 ~ TRUE,
+      TRUE                                ~ FALSE
+    ),
+    ftype_mvlib_14 = factor(
       case_when(
         !on_mv_rand24  ~ as.numeric(NA),
-        event_mvlib_30 ~ 1,
-        event_death_30 ~ 2,
+        event_mvlib_14 ~ 1,
+        death == "Yes" & daysto_death <= 14 ~ 2,
         TRUE           ~ 0
       ),
       levels = 0:2, labels = c("Censored", "MV Liberation", "Death")
     ),
-    tte_icudis_30 = case_when(
+    tte_icudis_90 = case_when(
       is.na(daysto_icudis_all) ~ as.numeric(NA),
-      daysto_icudis_all <= 30  ~ daysto_icudis_all,
-      TRUE                     ~ censor_ih
+      daysto_icudis_all <= 90  ~ daysto_icudis_all,
+      TRUE                     ~ censor_90
     ),
-    event_icudis_30 = case_when(
-      !is.na(icudis_succ) & icudis_succ == "Yes" & daysto_icudis_all <= 30 ~ TRUE,
+    event_icudis_90 = case_when(
+      !is.na(icudis_succ) & icudis_succ == "Yes" & daysto_icudis_all <= 90 ~ TRUE,
       TRUE                                           ~ FALSE
     ),
-    ftype_icudis_30 = factor(
+    ftype_icudis_90 = factor(
       case_when(
-        event_icudis_30 ~ 1,
-        event_death_30  ~ 2,
+        event_icudis_90 ~ 1,
+        event_death_90  ~ 2,
         TRUE            ~ 0
       ),
       levels = 0:2, labels = c("Censored", "ICU Discharge", "Death")
     ),
-    tte_hospdis_30 = case_when(
+    tte_hospdis_90 = case_when(
       is.na(hosp_los)           ~ as.numeric(NA),
-      daysto_hospdis_succ <= 30 ~ daysto_hospdis_succ,
-      hosp_los <= 30            ~ hosp_los,
-      TRUE                      ~ censor_ih
+      daysto_hospdis_succ <= 90 ~ daysto_hospdis_succ,
+      hosp_los <= 90            ~ hosp_los,
+      TRUE                      ~ censor_90
     ),
-    event_hospdis_30 = case_when(
-      hospdis_succ == "Yes" & daysto_hospdis_succ <= 30 ~ TRUE,
+    event_hospdis_90 = case_when(
+      hospdis_succ == "Yes" & daysto_hospdis_succ <= 90 ~ TRUE,
       TRUE                                              ~ FALSE
     ),
-    ftype_hospdis_30 = factor(
+    ftype_hospdis_90 = factor(
       case_when(
-        event_hospdis_30 ~ 1,
-        event_death_30   ~ 2,
+        event_hospdis_90 ~ 1,
+        event_death_90   ~ 2,
         TRUE             ~ 0
       ),
       levels = 0:2, labels = c("Censored", "Hospital Discharge", "Death")
