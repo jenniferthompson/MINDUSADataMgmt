@@ -613,22 +613,22 @@ datestrack_df <- reduce(
       death == "Yes" & daysto_death <= 90 ~ TRUE,
       TRUE                                ~ FALSE
     ),
-    tte_mvlib_14 = case_when(
+    tte_mvlib_30 = case_when(
       !on_mv_rand24 | is.na(daysto_mvlib_all) ~ as.numeric(NA),
-      daysto_mvlib_all <= 14                  ~ daysto_mvlib_all,
-      TRUE                                    ~ censor_14
+      daysto_mvlib_all <= 30                  ~ daysto_mvlib_all,
+      TRUE                                    ~ censor_30
     ),
-    event_mvlib_14 = case_when(
+    event_mvlib_30 = case_when(
       !on_mv_rand24                       ~ as.logical(NA),
-      ever_mvlib & daysto_mvlib_all <= 14 ~ TRUE,
+      ever_mvlib & daysto_mvlib_all <= 30 ~ TRUE,
       TRUE                                ~ FALSE
     ),
-    ftype_mvlib_14 = factor(
+    ftype_mvlib_30 = factor(
       case_when(
-        !on_mv_rand24  ~ as.numeric(NA),
-        event_mvlib_14 ~ 1,
-        death == "Yes" & daysto_death <= 14 ~ 2,
-        TRUE           ~ 0
+        !on_mv_rand24                       ~ as.numeric(NA),
+        event_mvlib_30                      ~ 1,
+        death == "Yes" & daysto_death <= 30 ~ 2,
+        TRUE                                ~ 0
       ),
       levels = 0:2, labels = c("Censored", "MV Liberation", "Death")
     ),
