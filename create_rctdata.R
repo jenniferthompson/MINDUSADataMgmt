@@ -21,6 +21,7 @@ paddaily_df      <- readRDS("analysisdata/rds/paddaily.rds")
 padsummary_df    <- readRDS("analysisdata/rds/padsummary.rds")
 dailydata_df     <- readRDS("analysisdata/rds/dailydata.rds")
 dailysummary_df  <- readRDS("analysisdata/rds/dailysummary.rds")
+abcdecomp_df     <- readRDS("analysisdata/rds/abcdecomp.rds")
 safetydaily_df   <- readRDS("analysisdata/rds/safetydaily.rds")
 safetysummary_df <- readRDS("analysisdata/rds/safetysummary.rds")
 torsades_df      <- readRDS("analysisdata/rds/torsadesaes.rds")
@@ -70,7 +71,8 @@ daily_all_df <- reduce(
     allptevents_df,
     paddaily_df,
     dailydata_df,
-    safetydaily_df
+    safetydaily_df,
+    abcdecomp_df
   ),
   left_join,
   by = c("id", "redcap_event_name")
@@ -97,7 +99,8 @@ daily_int_df <- reduce(
     randptevents_df %>% left_join(trt_df, by = "id"),
     paddaily_df,
     dailydata_df,
-    safetydaily_df
+    safetydaily_df,
+    abcdecomp_df
   ),
   left_join,
   by = c("id", "redcap_event_name")
