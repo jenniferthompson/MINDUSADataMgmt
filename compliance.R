@@ -111,7 +111,7 @@ compliance_df <- compliance_raw %>%
     
     ## Get number of nonpharmacological interventions
     nonpharm_int = ifelse(
-      elig_d, NA,
+      !elig_d, NA,
       rowSums(.[, paste0("nonpharm_int_", 1:4)], na.rm = TRUE)
     ),
     comp_d = case_when(
@@ -130,6 +130,10 @@ compliance_df <- compliance_raw %>%
     ##     clinical refusal
     elig_e = !is.na(abcde_icu) & abcde_icu &
       !(!is.na(mobility_occur_rsn_3) & mobility_occur_rsn_3),
+    
+    ## If eligible but criteria not met, fill in F for whether mobility occurred
+    mobility_occur = ifelse(elig_e & !mobility_crit, FALSE, mobility_occur),
+    
     comp_e = case_when(
       !elig_e ~ as.logical(NA),
       is.na(mobility_crit) ~ FALSE,
@@ -153,7 +157,6 @@ compliance_df <- compliance_raw %>%
     sat_rsn_paralytics = sat_rsn_4,
     sat_rsn_mi = sat_rsn_5,
     sat_rsn_icp = sat_rsn_6,
-    sbt_rsn_nosat = sbt_rsn_1,
     sbt_rsn_agitation = sbt_rsn_3,
     sbt_rsn_o2sat = sbt_rsn_4,
     sbt_rsn_fio2 = sbt_rsn_5,
@@ -174,9 +177,10 @@ compliance_df <- compliance_raw %>%
   ) %>%
   dplyr::select(
     id, redcap_event_name, starts_with("elig_"), starts_with("comp_"),
-    matches("^sat_rsn_[a-z]"), matches("^sbt_rsn_[a-z]"),
-    matches("^nonpharm_int_[a-z]"), matches("^mobility_rsn_[a-z]"),
-    nonpharm_int, mobility_highest
+    "sat_today", matches("^sat_rsn_[a-z]"),
+    "sbt_today", matches("^sbt_rsn_[a-z]"),
+    matches("^nonpharm_int_[a-z]"), nonpharm_int,
+    "mobility_occur", matches("^mobility_rsn_[a-z]"), mobility_highest
   )
 
 ## -- Save final dataset -------------------------------------------------------
