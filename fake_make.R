@@ -30,3 +30,6 @@ source("safety.R")
 ## covariates to impute missing mental status
 rm(list = ls())
 source("pad.R")
+
+rm(list = ls())
+source("compliance.R")
