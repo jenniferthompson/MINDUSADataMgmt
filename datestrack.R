@@ -633,13 +633,16 @@ datestrack_df <- reduce(
       levels = 0:2, labels = c("Censored", "MV Liberation", "Death")
     ),
     tte_icudis_90 = case_when(
-      is.na(daysto_icudis_all) ~ as.numeric(NA),
-      daysto_icudis_all <= 90  ~ daysto_icudis_all,
-      TRUE                     ~ censor_90
+      is.na(daysto_icudis_all)                 ~ as.numeric(NA),
+      !is.na(daysto_death) &
+        (daysto_death - daysto_icudis_all < 2) ~ daysto_death,
+      daysto_icudis_all <= 90                  ~ daysto_icudis_all,
+      TRUE                                     ~ censor_90
     ),
     event_icudis_90 = case_when(
-      !is.na(icudis_succ) & icudis_succ == "Yes" & daysto_icudis_all <= 90 ~ TRUE,
-      TRUE                                           ~ FALSE
+      !is.na(icudis_succ) &
+        icudis_succ == "Yes" & daysto_icudis_all <= 90 ~ TRUE,
+      TRUE                                             ~ FALSE
     ),
     ftype_icudis_90 = factor(
       case_when(
@@ -650,10 +653,11 @@ datestrack_df <- reduce(
       levels = 0:2, labels = c("Censored", "ICU Discharge", "Death")
     ),
     tte_hospdis_90 = case_when(
-      is.na(hosp_los)           ~ as.numeric(NA),
-      daysto_hospdis_succ <= 90 ~ daysto_hospdis_succ,
-      hosp_los <= 90            ~ hosp_los,
-      TRUE                      ~ censor_90
+      is.na(hosp_los)                                      ~ as.numeric(NA),
+      daysto_hospdis_succ <= 90                            ~ daysto_hospdis_succ,
+      !is.na(daysto_death) & (daysto_death - hosp_los < 2) ~ daysto_death,
+      hosp_los <= 90                                       ~ hosp_los,
+      TRUE                                                 ~ censor_90
     ),
     event_hospdis_90 = case_when(
       hospdis_succ == "Yes" & daysto_hospdis_succ <= 90 ~ TRUE,
