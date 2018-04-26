@@ -61,12 +61,12 @@ ntf_raw <- import_df(
 ## - Explanation (ntf_explain_x)
 ntf_df <- ntf_raw %>%
   dplyr::select(
-    id, starts_with("ntf_reason_"), starts_with("ntf_vccrisk_"),
+    id, ntf_number, starts_with("ntf_reason_"), starts_with("ntf_vccrisk_"),
     starts_with("ntf_noncompliance_"), starts_with("ntf_explain_")
   ) %>%
-  ## Reshape from wide to long format
+  ## -- Reshape from wide (many cols per NTF) to long (one row per NTF) --------
   ## One row per possible NTF, per piece of info
-  gather(key = "ntf_var", value = "ntf_value", -id) %>%
+  gather(key = "ntf_var", value = "ntf_value", -id, -ntf_number) %>%
   ## Separate variable name into [variable name], [NTF number],
   ## [checkbox option] (checkbox option only relevant for ntf_reason variables;
   ## all others will have NA for ntf_option)
@@ -74,5 +74,36 @@ ntf_df <- ntf_raw %>%
     col = ntf_var,
     into = c("ntf_var", "ntf_event", "ntf_option"),
     sep = "\\_(?=[0-9])"
-  )
+  ) %>%
+  ## Add category suffix back onto ntf_reason variables
+  unite(col = ntf_var, ntf_var, ntf_option) %>%
+  mutate(ntf_var = str_remove(ntf_var, "\\_NA$")) %>%
+  spread(key = ntf_var, value = ntf_value) %>%
+  ## Change everything but ID, explanation back to numeric
+  mutate_at(vars(-id, -ntf_explain), as.numeric) %>%
+  ## Keep only real events: ntf_number is present and >= ntf_event
+  ## (REDCap branching logic only shows as many sets of NTF variables as are
+  ##  entered in ntf_number, so no possibility for "extra" events to be entered)
+  filter(!is.na(ntf_number) & ntf_event <= ntf_number) %>%
+  ## Rename category variables for clarity, make logicals
+  rename(
+    ntf_cat_incexc    = ntf_reason_1,
+    ntf_cat_specimen  = ntf_reason_2,
+    ntf_cat_titration = ntf_reason_3,
+    ntf_cat_asmt      = ntf_reason_4,
+    ntf_cat_saevcc    = ntf_reason_5,
+    ntf_cat_saeirb    = ntf_reason_6,
+    ntf_cat_other     = ntf_reason_7
+  ) %>%
+  mutate_at(vars(ntf_noncompliance:ntf_vccrisk), as.logical) %>%
+  ## Remove PHI from explanations
+  mutate(ntf_explain = remove_phi(ntf_explain))
 
+## -- Dataset for only protocol noncompliance events ---------------------------
+noncomp_df <- ntf_df %>%
+  ## Filter to events that meet definitions of noncompliance w/ inc risk
+  filter(ntf_noncompliance == 1 & ntf_vccrisk == 1)
+
+## -- Save final noncompliance dataset -----------------------------------------
+saveRDS(noncomp_df, file = "analysisdata/rds/noncompliance.rds")
+write_csv(noncomp_df, path = "analysisdata/csv/noncompliance.csv")
