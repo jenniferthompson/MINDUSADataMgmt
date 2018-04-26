@@ -33,3 +33,6 @@ source("pad.R")
 
 rm(list = ls())
 source("compliance.R")
+
+rm(list = ls())
+source("ntf.R")
