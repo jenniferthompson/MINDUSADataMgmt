@@ -281,7 +281,9 @@ remove_phi <- function(x){
     x,
     c(
       ## Dates
-      "[0-9]+[/|-][0-9]+([/|-][0-9][0-9][0-9]*)*" = "xx/xx/xx",
+      "[0-9]+(/|-|.)[0-9]+((/|-|.)[0-9][0-9][0-9]*)*" = "xx/xx/xx",
+      "[0-9]+(th|rd|st)* *(of )*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|January|February|March|April|June|July|August|September|October|November|December)" = "xx/xx/xx",
+      "(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|june|july|august|september|october|november|december|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC|JANUARY|FEBRUARY|MARCH|APRIL|JUNE|JULY|AUGUST|SEPTEMBER|OCTOBER|NOVEMBER|DECEMBER|January|February|March|April|June|July|August|September|October|November|December) *[0-9]+" = "xx/xx/xx",
       ## Times
       ## 1) xx:xx format
       ## 2) xxxx format
