@@ -541,6 +541,51 @@ last_icu_dc <- icu_dates %>%
     )
   )
 
+## Calculate time between first ICU discharge and next ICU admission, if
+##  applicable, for patients who survived first ICU stay with access to PHI
+first_icudis <- icu_dates %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup() %>%
+  ## How does the time out of the ICU end?
+  left_join(dates_df %>% dplyr::select(id, hospdis_time), by = "id") %>%
+  mutate(
+    ## Patients are not considered for readmission analyses if they were
+    ## never discharged from their first ICU stay, or withdrew access to PHI
+    ## during the first ICU stay
+    elig_readm = !(is.na(icu_dis) |
+      (!is.na(studywd_time) & studywd_time < icu_dis & hospdis_noinfo)),
+    
+    readm_status = case_when(
+      !elig_readm ~ as.character(NA),
+      !is.na(icu_adm_next) ~ "Readmission",
+      !is.na(hospdis_time) ~ "Hospital discharge",
+      !is.na(studywd_time) ~ "Study withdrawal",
+      !is.na(death_time) ~ "Death",
+      TRUE ~ "Unknown"
+    ),
+    
+    ## How long between ICU discharge and readmission (for those readmitted)?
+    daysto_readm_exp = ifelse(
+      !elig_readm, NA,
+      as.numeric(difftime(icu_adm_next, icu_dis, units = "days"))
+    ),
+    
+    ## How long between ICU discharge and in-hospital end date (hospital
+    ## discharge, death, or withdrawal)?
+    daysto_readm_all = case_when(
+      !elig_readm ~ as.numeric(NA),
+      !is.na(daysto_readm_exp) ~ daysto_readm_exp,
+      !is.na(hospdis_time) ~
+        as.numeric(difftime(hospdis_time, icu_dis, units = "days")),
+      !is.na(death_time) ~
+        as.numeric(difftime(death_time, icu_dis, units = "days")),
+      !is.na(studywd_time) & studywd_time > icu_dis ~
+        as.numeric(difftime(studywd_time, icu_dis, units = "days")),
+      TRUE ~ as.numeric(NA)
+    )
+  )
+
 ## -- Create final summary dataset ---------------------------------------------
 ## For now, leaves out all dates as potential identifiers
 datestrack_df <- reduce(
@@ -560,19 +605,22 @@ datestrack_df <- reduce(
         studywd, studywd_ih, hospdis_noinfo, studywd_person:studywd_writing_other,
         daysto_wd, daysto_wd_ih,
         hospdis, hospdis_succ, hospdis_loc, hospdis_loc_other, hospdis_vent,
-        hosp_los, daysto_hospdis, daysto_hospdis_succ
+        hosp_los, daysto_hospdis, daysto_hospdis_succ, hospdis_noinfo
       )
     ),
     mv_summary,
     icu_summary,
     last_icu_dc %>%
-      dplyr::select(id, icudis_succ, daysto_icudis_all, daysto_icudis_exp)
+      dplyr::select(id, icudis_succ, daysto_icudis_all, daysto_icudis_exp),
+    first_icudis %>%
+      dplyr::select(
+        id, elig_readm, readm_status, daysto_readm_exp, daysto_readm_all
+      )
   ),
   left_join,
   by = "id"
 ) %>%
   ## Create time-to-event variables, cut off or censored at a given time point
-  ## In-hospital outcomes all cut off at 30 days
   ## "Successful" ICU or hospital discharge is followed by 48 hours alive.
   mutate(
     ## Thanks to A+ followup team, we can be pretty certain that if a patient
@@ -670,21 +718,36 @@ datestrack_df <- reduce(
         TRUE             ~ 0
       ),
       levels = 0:2, labels = c("Censored", "Hospital Discharge", "Death")
+    ),
+    tte_readm_90 = case_when(
+      !elig_readm            ~ as.numeric(NA),
+      daysto_readm_all <= 90 ~ daysto_readm_all,
+      TRUE                   ~ censor_90
+    ),
+    event_readm_90 = case_when(
+      !elig_readm ~ as.logical(NA),
+      readm_status == "Readmission" & daysto_readm_all <= 90 ~ TRUE,
+      TRUE                                                   ~ FALSE
+    ),
+    ftype_readm_90 = factor(
+      case_when(
+        !elig_readm                   ~ as.numeric(NA),
+        readm_status == "Readmission" ~ 1,
+        readm_status == "Death"       ~ 2,
+        TRUE                          ~ 0
+      ),
+      levels = 0:2, labels = c("Censored", "Readmission", "Death")
     )
   ) %>%
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
   ## discharge, withdrawal, death info
   select(id, coenroll_sails:mv_num, ever_mv, days_mv_all, days_mv_exp,
          on_mv_atrand, on_mv_rand24, ever_mvlib, ever_mvlib_rand24,
-         daysto_mvlib_exp, daysto_mvlib_all,
-         icu_readmit_number, icu_los, icudis_succ, daysto_icudis_all,
-         daysto_icudis_exp,
-         hosp_los, hospdis, daysto_hospdis, hospdis_succ, daysto_hospdis_succ,
-         hospdis_loc:hospdis_vent,
-         studywd, daysto_wd, studywd_ih, hospdis_noinfo, daysto_wd_ih,
-         studywd_person:studywd_writing_other,
-         death, death_wdtrt, daysto_death, death_ih, daysto_death_ih,
-         matches("^tte|event|ftype"))
+         icu_readmit_number, icu_los, icudis_succ, hosp_los, hospdis,
+         hospdis_succ, hospdis_loc:hospdis_vent, studywd, studywd_ih,
+         hospdis_noinfo, studywd_person:studywd_writing_other,
+         death, death_wdtrt, death_ih, elig_readm, readm_status,
+         matches("^tte|event|ftype"), starts_with("daysto_"))
 
 saveRDS(datestrack_df, file = "analysisdata/rds/datestrack.rds")
 write_csv(datestrack_df, path = "analysisdata/csv/datestrack.csv")

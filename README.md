@@ -21,6 +21,9 @@ drug doses on all hospital days, vs only intervention or only ICU days)*
 - `_icu`: "ICU" *(eg, only on ICU days, vs days on the floor)*
 - `_adm`: "at ICU admission" *(eg, SOFA at ICU admission, vs daily in ICU)*
 - `_rand`: "at randomization" *(eg, SOFA or RASS on the day of randomization)*
+- `mvlib`: Liberation from mechanical ventilation (invasive or noninvasive),
+followed by at least 48h alive without reinitiation
+- `readm`: ICU readmission
 
 ### Scripts
 
