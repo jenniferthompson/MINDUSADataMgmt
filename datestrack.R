@@ -673,16 +673,18 @@ datestrack_df <- reduce(
     ),
     ftype_mvlib_30 = factor(
       case_when(
-        !on_mv_rand24                       ~ as.numeric(NA),
-        event_mvlib_30                      ~ 1,
-        death == "Yes" & daysto_death <= 30 ~ 2,
-        TRUE                                ~ 0
+        !on_mv_rand24                           ~ as.numeric(NA),
+        event_mvlib_30                          ~ 1,
+        death == "Yes" & daysto_death <= 30     ~ 2,
+        hospdis == "Yes" & daysto_hospdis <= 30 ~ 3,
+        TRUE                                    ~ 0
       ),
-      levels = 0:2, labels = c("Censored", "MV Liberation", "Death")
+      levels = 0:3, labels = c("Censored", "MV Liberation", "Death", "Discharge")
     ),
     tte_icudis_90 = case_when(
       is.na(daysto_icudis_all)                 ~ as.numeric(NA),
       !is.na(daysto_death) &
+        daysto_death <= 90 &
         (daysto_death - daysto_icudis_all < 2) ~ daysto_death,
       daysto_icudis_all <= 90                  ~ daysto_icudis_all,
       TRUE                                     ~ censor_90
@@ -703,7 +705,9 @@ datestrack_df <- reduce(
     tte_hospdis_90 = case_when(
       is.na(hosp_los)                                      ~ as.numeric(NA),
       daysto_hospdis_succ <= 90                            ~ daysto_hospdis_succ,
-      !is.na(daysto_death) & (daysto_death - hosp_los < 2) ~ daysto_death,
+      !is.na(daysto_death) &
+        daysto_death <= 90 &
+        (daysto_death - hosp_los < 2) ~ daysto_death,
       hosp_los <= 90                                       ~ hosp_los,
       TRUE                                                 ~ censor_90
     ),
@@ -731,12 +735,13 @@ datestrack_df <- reduce(
     ),
     ftype_readm_90 = factor(
       case_when(
-        !elig_readm                   ~ as.numeric(NA),
-        readm_status == "Readmission" ~ 1,
-        readm_status == "Death"       ~ 2,
-        TRUE                          ~ 0
+        !elig_readm                          ~ as.numeric(NA),
+        readm_status == "Readmission"        ~ 1,
+        readm_status == "Death"              ~ 2,
+        readm_status == "Hospital discharge" ~ 3,
+        TRUE                                 ~ 0
       ),
-      levels = 0:2, labels = c("Censored", "Readmission", "Death")
+      levels = 0:3, labels = c("Censored", "Readmission", "Death", "Discharge")
     )
   ) %>%
   ## Reorder variables: enrollment/randomization; MV; ICU/hospital LOS;
