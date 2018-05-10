@@ -560,8 +560,8 @@ first_icudis <- icu_dates %>%
       !elig_readm ~ as.character(NA),
       !is.na(icu_adm_next) ~ "Readmission",
       !is.na(hospdis_time) ~ "Hospital discharge",
-      !is.na(studywd_time) ~ "Study withdrawal",
       !is.na(death_time) ~ "Death",
+      !is.na(studywd_time) ~ "Study withdrawal",
       TRUE ~ "Unknown"
     ),
     
@@ -735,11 +735,11 @@ datestrack_df <- reduce(
     ),
     ftype_readm_90 = factor(
       case_when(
-        !elig_readm                          ~ as.numeric(NA),
-        readm_status == "Readmission"        ~ 1,
-        readm_status == "Death"              ~ 2,
-        readm_status == "Hospital discharge" ~ 3,
-        TRUE                                 ~ 0
+        !elig_readm                                                 ~ as.numeric(NA),
+        readm_status == "Readmission" & event_readm_90              ~ 1,
+        readm_status == "Death" & tte_readm_90 < 90.01              ~ 2,
+        readm_status == "Hospital discharge" & tte_readm_90 < 90.01 ~ 3,
+        TRUE                                                        ~ 0
       ),
       levels = 0:3, labels = c("Censored", "Readmission", "Death", "Discharge")
     )
