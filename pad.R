@@ -95,6 +95,20 @@ pad_long <- pad_raw %>%
   separate(padvar, into = c("padvar", "assess_which"), sep = "\\_(?=[0-9]$)") %>%
   spread(key = padvar, value = padvalue) %>%
   rename(assess_today = "assess_number") %>%
+  ## Need to add on in-hospital days during in-hospital followup (day 0 up to
+  ## potentially day 18) where patient had no assessment data (due to withdrawal
+  ## or other reasons). Not in current dataset because no assessment was done,
+  ## but we want to impute mental status for these days to avoid having to
+  ## assume they are normal. These days are assumed to have one assessment,
+  ## since we don't know for sure if they were in or out of the ICU.
+  full_join(
+    randpts_events %>%
+      filter(
+        study_status %in% c("Intervention", "Post-intervention", "Withdrawn")
+      ) %>%
+      dplyr::select(id, redcap_event_name),
+    by = c("id", "redcap_event_name")
+  ) %>%
   ## If no assessments done at all that day, impute reason entered for entire
   ##  day for each assessment (all-day reasons have same factor levels as
   ##  individual assessments, plus 5 = died/discharged/DQ/wd before assessment)
@@ -170,10 +184,81 @@ pad_long <- pad_raw %>%
   ## Add on date of randomization and calculate days before/after randomization
   select(id, redcap_event_name, assess_date, assess_today, assess_should,
          assess_which:assess_who, cpot, cpot_incomp_rsn, cpot_incomp_other,
-         rass, rass_incomp_rsn, rass_incomp_other, cam:cam_f2, cam_incomp_rsn,
-         cam_incomp_other)
+         rass, rass_incomp_rsn, rass_incomp_other, cam:cam_f4, cam_incomp_rsn,
+         cam_incomp_other) %>%
+  rename_at(vars(rass, cam:cam_f4), ~ paste0(., "_raw"))
+
+## -- Decision: Use single imputation to impute missing mental status ----------
+
+## Rationale: We have relatively low rates of missingness, thanks to the hard
+##  work of our research coordinators (including days after withdrawal, <4% of
+##  all in-hospital days have no mental status; 4.9% hospital days during
+##  intervention period).
+## Imputation lets us incorporate RASS/CAM on the day before/after as well as
+##  other covariates, like severity of illness, into filling in missing values.
+##  We use single imputation (vs multiple) because we'll need to summarize these
+##  daily variables into variables like delirium duration and DCFDs. This choice
+##  is preferable to LOCF both because mental status can change quite quickly,
+##  meaning that relying on LOCF for >1 day can be risky, and because a few
+##  consented patients have no mental status available on the day of consent,
+##  meaning there is nothing to carry forward.
+
+## Create dataset with variables for imputation
+pad_forimputation <- pad_long %>%
+  dplyr::select(id, redcap_event_name, cpot, rass_raw, cam_raw:cam_f4_raw) %>%
+  # mutate(rass = factor(rass)) ## So we won't accidentally get extreme numeric values
+  ## Add daily data: Drugs/drug classes, raw variables used for SOFA
+  ## (Use total converted benzos, opioids, antipsychotics, not individual drugs)
+  left_join(
+    dplyr::select(
+      daily_df,
+      -nms_daily,
+      -matches("^daily\\_midaz|diaz|loraz|fent|hydromorph|morph|halop|quet|ari|olanz|risp|zipras$"),
+      -matches("sofa\\_.*[imp|raw]$")
+    ),
+    by = c("id", "redcap_event_name")
+  ) %>%
+  ## Baseline data: age, gender, insurance, bmi, home antipsychotics,
+  ##  comorbidities, frailty, APACHE APS, education, language
+  left_join(
+    dplyr::select(
+      demog_df,
+      id, age_consent, gender, insurance, bmi, home_antipsyc, charlson_total,
+      frailty, apache_aps_adm, education, english_level
+    ),
+    by = "id"
+  ) %>%
+  ## Add variables for the day before, after
+  group_by(id) %>%
+  mutate_at(vars(rass_raw:cam_f4_raw), funs(before = lag(., n = 1))) %>%
+  mutate_at(vars(rass_raw:cam_f4_raw), funs(after = lead(., n = 1))) %>%
+  ungroup() %>%
+  dplyr::select(-id, -redcap_event_name)
+
+## mice options:
+## - For CAM, use default method of polytomous regression; for RASS, PMM
+## - Impute variables in increasing order of missingness
+## - Set seed for reproducibility
+## - Need only one final dataset
+
+## Keep the furrr package in mind once it hits CRAN!
+##  https://github.com/DavisVaughan/furrr
+##  Use case: http://www.brodrigues.co/blog/2018-04-14-playing_with_furrr/
+
+asmt_mice <- mice(
+  data = pad_forimputation,
+  m = 1,
+  visitSequence = "monotone",
+  seed = 8675309
+)
+
+## Extract filled-in RASS, CAM variables; append to pad_long as new variables
+asmt_mice_comp <- mice::complete(asmt_mice)
+pad_long$rass_imp <- asmt_mice_comp$rass_raw
+pad_long$cam_imp <- asmt_mice_comp$cam_raw
 
 ## -- Determine presence of delirium and/or coma on every *day* ----------------
+## Using both raw and imputed RASS, CAM
 ## CAM must be present to qualify for delirium or normal status.
 ## Coma can be based on RASS or CAM alone.
 ##
@@ -191,94 +276,176 @@ pad_long <- pad_long %>%
     ## Indicators for whether CAM and/or RASS available (if RASS is -4/-5, can
     ## still determine status even if CAM missing)
     ## If RASS > -4 but CAM is UTA, consider CAM missing; this shouldn't happen
-    has_rass = !is.na(rass),
-    has_cam = !is.na(cam),
-    has_camrass =
-      !is.na(cam) & !is.na(rass) & !(rass > -4 & cam == "Unable to Assess"),
+    has_rass_raw = !is.na(rass_raw),
+    has_cam_raw = !is.na(cam_raw),
+    ## Everyone has imputed RASS, CAM, because we just made them
+    has_camrass_raw =
+      !is.na(cam_raw) & !is.na(rass_raw) &
+      !(rass_raw > -4 & cam_raw == "Unable to Assess"),
+    has_camrass_imp =
+      !is.na(cam_imp) & !is.na(rass_imp) &
+      !(rass_imp > -4 & cam_imp == "Unable to Assess"),
     ## Indicator for whether CAM, RASS conflict: RASS > -4 and CAM is UTA, or vv
-    camrass_conflict = case_when(
-      has_rass & rass > -4 & has_cam & cam == "Unable to Assess"          ~ TRUE,
-      has_rass & rass < -3 & has_cam & cam %in% c("Positive", "Negative") ~ TRUE,
-      TRUE                                                                ~ FALSE
+    camrass_conflict_raw = case_when(
+      has_rass_raw & rass_raw > -4 &
+        has_cam_raw & cam_raw == "Unable to Assess"          ~ TRUE,
+      has_rass_raw & rass_raw < -3 &
+        has_cam_raw & cam_raw %in% c("Positive", "Negative") ~ TRUE,
+      TRUE                                                   ~ FALSE
     ),
-
+    camrass_conflict_imp = case_when(
+      rass_imp > -4 & cam_imp == "Unable to Assess"          ~ TRUE,
+      rass_imp < -3 & cam_imp %in% c("Positive", "Negative") ~ TRUE,
+      TRUE                                                   ~ FALSE
+    ),
+    
     ## Indicators for delirium, coma, normal status
-    comatose = case_when(
-      camrass_conflict | (!has_rass & !has_cam) ~ as.logical(NA),
-      has_rass & rass < -3                      ~ TRUE,
-      has_cam & cam == "Unable to Assess"       ~ TRUE,
-      TRUE                                      ~ FALSE
+    comatose_raw = case_when(
+      camrass_conflict_raw | (!has_rass_raw & !has_cam_raw) ~ as.logical(NA),
+      has_rass_raw & rass_raw < -3                          ~ TRUE,
+      has_cam_raw & cam_raw == "Unable to Assess"           ~ TRUE,
+      TRUE                                                  ~ FALSE
     ),
-    delirious = case_when(
-      camrass_conflict            ~ as.logical(NA),
-      has_rass & rass < -3        ~ FALSE,
-      !has_cam                    ~ as.logical(NA),
-      has_cam & cam == "Positive" ~ TRUE,
-      TRUE                        ~ FALSE
+    comatose_imp = case_when(
+      camrass_conflict_imp          ~ as.logical(NA),
+      rass_imp < -3                 ~ TRUE,
+      cam_imp == "Unable to Assess" ~ TRUE,
+      TRUE                          ~ FALSE
     ),
-    normal = case_when(
-      camrass_conflict | !has_cam ~ as.logical(NA),
-      has_cam & cam == "Negative" ~ TRUE,
-      TRUE                        ~ FALSE
+    delirious_raw = case_when(
+      camrass_conflict_raw                ~ as.logical(NA),
+      has_rass_raw & rass_raw < -3        ~ FALSE,
+      !has_cam_raw                        ~ as.logical(NA),
+      has_cam_raw & cam_raw == "Positive" ~ TRUE,
+      TRUE                                ~ FALSE
+    ),
+    delirious_imp = case_when(
+      camrass_conflict_imp  ~ as.logical(NA),
+      rass_imp < -3         ~ FALSE,
+      cam_imp == "Positive" ~ TRUE,
+      TRUE                  ~ FALSE
+    ),
+    normal_raw = case_when(
+      camrass_conflict_raw | !has_cam_raw ~ as.logical(NA),
+      has_cam_raw & cam_raw == "Negative" ~ TRUE,
+      TRUE                                ~ FALSE
+    ),
+    normal_imp = case_when(
+      camrass_conflict_imp  ~ as.logical(NA),
+      cam_imp == "Negative" ~ TRUE,
+      TRUE                  ~ FALSE
     ),
     ## Currently using most conservative approach: if we can't definitively
     ## say patient is/is not comatose and delirious, brain dysfunction is NA
-    braindys = case_when(
-      camrass_conflict              ~ as.logical(NA),
-      !is.na(comatose) & comatose   ~ TRUE,
-      !is.na(delirious) & delirious ~ TRUE,
-      !is.na(normal) & normal       ~ FALSE,
-      TRUE                          ~ as.logical(NA)
+    braindys_raw = case_when(
+      camrass_conflict_raw                  ~ as.logical(NA),
+      !is.na(comatose_raw) & comatose_raw   ~ TRUE,
+      !is.na(delirious_raw) & delirious_raw ~ TRUE,
+      !is.na(normal_raw) & normal_raw       ~ FALSE,
+      TRUE                                  ~ as.logical(NA)
+    ),
+    braindys_imp = case_when(
+      camrass_conflict_imp                  ~ as.logical(NA),
+      !is.na(comatose_imp) & comatose_imp   ~ TRUE,
+      !is.na(delirious_imp) & delirious_imp ~ TRUE,
+      !is.na(normal_imp) & normal_imp       ~ FALSE,
+      TRUE                                  ~ as.logical(NA)
+    ),
+    ## Indicators for hyperactive, hypoactive delirium
+    hyperdel_raw = case_when(
+      camrass_conflict_raw                               ~ as.logical(NA),
+      has_rass_raw & rass_raw < -3                       ~ FALSE,
+      ## If delirious, but no RASS, we can't determine hypo vs hyperactive
+      !has_cam_raw | !has_rass_raw                       ~ as.logical(NA),
+      has_cam_raw & cam_raw == "Positive" & rass_raw > 0 ~ TRUE,
+      TRUE                                               ~ FALSE
+    ),
+    hyperdel_imp = case_when(
+      camrass_conflict_imp                 ~ as.logical(NA),
+      rass_imp < -3                        ~ FALSE,
+      cam_imp == "Positive" & rass_imp > 0 ~ TRUE,
+      TRUE                                 ~ FALSE
+    ),
+    hypodel_raw = case_when(
+      camrass_conflict_raw                               ~ as.logical(NA),
+      has_rass_raw & rass_raw < -3                       ~ FALSE,
+      ## If delirious, but no RASS, we can't determine hypo vs hyperactive
+      !has_cam_raw | !has_rass_raw                       ~ as.logical(NA),
+      has_cam_raw & cam_raw == "Positive" & rass_raw < 1 ~ TRUE,
+      TRUE                                               ~ FALSE
+    ),
+    hypodel_imp = case_when(
+      camrass_conflict_imp                 ~ as.logical(NA),
+      rass_imp < -3                        ~ FALSE,
+      cam_imp == "Positive" & rass_imp < 1 ~ TRUE,
+      TRUE                                 ~ FALSE
     )
   )
 
-## Write conflicting CAM/RASSes to CSV for data cleaning
+## Write conflicting CAM/RASSes to CSV for data cleaning (original data only)
 subset(pad_long,
-       rass > -4 & cam == "Unable to Assess",
-       select = c(id, redcap_event_name, rass, cam)) %>%
+       rass_raw > -4 & cam_raw == "Unable to Assess",
+       select = c(id, redcap_event_name, rass_raw, cam_raw)) %>%
   left_join(ih_events %>% select(event_name, unique_event_name),
             by = c("redcap_event_name" = "unique_event_name")) %>%
   write_csv(path = "datachecks/conflicting_camrass.csv")
 
 ## Summarise coma, delirium, brain dysfunction; assign mental status each *day*
 pad_daily <- pad_long %>%
-  ## Need to add on in-hospital days during in-hospital followup (day 0 up to
-  ## potentially day 18) where patient had no assessment data (due to withdrawal
-  ## or other reasons). Not in current dataset because no assessment was done,
-  ## but we want to impute mental status for these days to avoid having to
-  ## assume they are normal.
-  full_join(
-    randpts_events %>%
-      filter(
-        study_status %in% c("Intervention", "Post-intervention", "Withdrawn")
-      ) %>%
-      dplyr::select(id, redcap_event_name),
-    by = c("id", "redcap_event_name")
-  ) %>%
   group_by(id, redcap_event_name) %>%
   summarise(
-    n_coma = sum(!is.na(comatose)),
-    n_del = sum(!is.na(delirious)),
-    n_normal = sum(!is.na(normal)),
-    n_dys = sum(!is.na(braindys)),
-    has_rass = sum_na(has_rass) > 0,
-    has_cam = sum_na(has_cam) > 0,
-    has_camrass = sum_na(has_camrass) > 0,
-    ## _raw because we will also have imputed versions of these
-    comatose_raw = ifelse(n_coma == 0, NA, sum_na(comatose) > 0),
-    delirious_raw = ifelse(n_del == 0, NA, sum_na(delirious) > 0),
-    normal_raw = ifelse(n_normal == 0, NA, sum_na(normal) > 0),
-    braindys_raw = ifelse(n_dys == 0, NA, sum_na(braindys) > 0)
+    ## Original data
+    n_coma_raw = sum(!is.na(comatose_raw)),
+    n_del_raw = sum(!is.na(delirious_raw)),
+    n_hyperdel_raw = sum(!is.na(hyperdel_raw)),
+    n_hypodel_raw = sum(!is.na(hypodel_raw)),
+    n_normal_raw = sum(!is.na(normal_raw)),
+    n_dys_raw = sum(!is.na(braindys_raw)),
+    has_rass_raw = sum_na(has_rass_raw) > 0,
+    has_cam_raw = sum_na(has_cam_raw) > 0,
+    has_camrass_raw = sum_na(has_camrass_raw) > 0,
+    comatose_raw = ifelse(n_coma_raw == 0, NA, sum_na(comatose_raw) > 0),
+    delirious_raw = ifelse(n_del_raw == 0, NA, sum_na(delirious_raw) > 0),
+    hyperdel_raw = ifelse(n_hyperdel_raw == 0, NA, sum_na(hyperdel_raw) > 0),
+    hypodel_raw = ifelse(n_hypodel_raw == 0, NA, sum_na(hypodel_raw) > 0),
+    normal_raw = ifelse(n_normal_raw == 0, NA, sum_na(normal_raw) > 0),
+    braindys_raw = ifelse(n_dys_raw == 0, NA, sum_na(braindys_raw) > 0),
+    ## Imputed data
+    n_coma_imp = sum(!is.na(comatose_imp)),
+    n_del_imp = sum(!is.na(delirious_imp)),
+    n_hyperdel_imp = sum(!is.na(hyperdel_imp)),
+    n_hypodel_imp = sum(!is.na(hypodel_imp)),
+    n_normal_imp = sum(!is.na(normal_imp)),
+    n_dys_imp = sum(!is.na(braindys_imp)),
+    has_rass_imp = sum(!is.na(rass_imp)) > 0,
+    has_cam_imp = sum(!is.na(cam_imp)) > 0,
+    has_camrass_imp = sum_na(has_camrass_imp) > 0,
+    comatose_imp = ifelse(n_coma_imp == 0, NA, sum_na(comatose_imp) > 0),
+    delirious_imp = ifelse(n_del_imp == 0, NA, sum_na(delirious_imp) > 0),
+    hyperdel_imp = ifelse(n_hyperdel_imp == 0, NA, sum_na(hyperdel_imp) > 0),
+    hypodel_imp = ifelse(n_hypodel_imp == 0, NA, sum_na(hypodel_imp) > 0),
+    normal_imp = ifelse(n_normal_imp == 0, NA, sum_na(normal_imp) > 0),
+    braindys_imp = ifelse(n_dys_imp == 0, NA, sum_na(braindys_imp) > 0)
   ) %>%
   ungroup() %>%
   select(-matches("^n\\_")) %>%
   mutate(
     mental_status_raw = factor(
-      ## Currently using most conservative approach: if we can't definitively
-      ## say that patient is/is not comatose and delirious, mental status is NA
-      ifelse(is.na(comatose_raw) | is.na(delirious_raw), NA,
-      ifelse(!is.na(delirious_raw) & delirious_raw, 2,
-      ifelse(!is.na(comatose_raw) & comatose_raw, 3, 1))),
+      case_when(
+        is.na(comatose_raw) | is.na(delirious_raw) ~ as.numeric(NA),
+        !is.na(delirious_raw) & delirious_raw      ~ 2,
+        !is.na(comatose_raw) & comatose_raw        ~ 3,
+        TRUE                                       ~ 1
+      ),
+      levels = 1:3, labels = c("Normal", "Delirious", "Comatose")
+    ),
+    mental_status_imp = factor(
+      case_when(
+        is.na(comatose_imp) | is.na(delirious_imp) ~ as.numeric(NA),
+        !is.na(delirious_imp) & delirious_imp      ~ 2,
+        !is.na(comatose_imp) & comatose_imp        ~ 3,
+        TRUE                                       ~ 1
+      ),
       levels = 1:3, labels = c("Normal", "Delirious", "Comatose")
     )
   )
@@ -379,87 +546,12 @@ pad_daily <- pad_long %>%
 # dt_missing <- datestrack_df %>%
 #   filter(id %in% subset(pad_daysmiss_int, nmiss > 2)$id)
 
-## -- Decision: Use single imputation to impute missing mental status ----------
-
-## Rationale: We have relatively low rates of missingness, thanks to the hard
-##  work of our research coordinators (including days after withdrawal, <4% of
-##  all in-hospital days; 4.9% hospital days during intervention period).
-## Imputation lets us incorporate statuses on the day before/after as well as
-##  other covariates, like severity of illness, into filling in missing values.
-##  We use single imputation (vs multiple) because we'll need to summarize these
-##  daily variables into variables like delirium duration and DCFDs. This choice
-##  is preferable to LOCF both because mental status can change quite quickly,
-##  meaning that relying on LOCF for >1 day can be risky, and because a few
-##  consented patients have no mental status available on the day of consent,
-##  meaning there is nothing to carry forward.
-
-## Create dataset with variables for imputation
-pad_forimputation <- pad_daily %>%
-  ## Daily data: Drugs/drug classes, raw variables used for SOFA
-  ## (Use total converted benzos, opioids, antipsychotics, not individual drugs)
-  left_join(
-    dplyr::select(
-      daily_df,
-      -nms_daily,
-      -matches("^daily\\_midaz|diaz|loraz|fent|hydromorph|morph|halop|quet|ari|olanz|risp|zipras$"),
-      -matches("sofa\\_.*[imp|raw]$")
-    ),
-    by = c("id", "redcap_event_name")
-  ) %>%
-  ## Baseline data: age, gender, insurance, bmi, home antipsychotics,
-  ##  comorbidities, frailty, APACHE APS, education, language
-  left_join(
-    dplyr::select(
-      demog_df,
-      id, age_consent, gender, insurance, bmi, home_antipsyc, charlson_total,
-      frailty, apache_aps_adm, education, english_level
-    ),
-    by = "id"
-  ) %>%
-  ## Add variables for mental status the day before, after
-  group_by(id) %>%
-  mutate(mental_status_before = lag(mental_status_raw, n = 1),
-         mental_status_after = lead(mental_status_raw, n = 1),
-         comatose_before = lag(comatose_raw, n = 1),
-         comatose_after = lead(comatose_raw, n = 1)) %>%
-  ungroup() %>%
-  dplyr::select(-id, -redcap_event_name, -has_rass, -has_cam, -has_camrass)
-
-## mice options:
-## - For imputing mental status, use default method of polytomous regression
-## - Impute variables in increasing order of missingness
-## - Set seed for reproducibility
-## - Need only one final dataset
-daily_mice <- mice(
-  data = pad_forimputation,
-  m = 1,
-  visitSequence = "monotone",
-  seed = 8675309
-)
-
-## Extract filled-in mental status variable; append to pad_daily as new variable
-pad_daily$mental_status_imp <- complete(daily_mice)$mental_status_raw
-
-## Create imputed delirium, coma, normal, braindys versions
-pad_daily$comatose_imp <- as.logical(complete(daily_mice)$comatose_raw)
-pad_daily <- pad_daily %>%
-  mutate(
-    ## Coma: Patient could have mental_status of delirium but also be comatose;
-    ##   due to imputation, comatose_imp could also be F while mental_status_imp
-    ##   is comatose. Make sure these variables align, treating
-    ##   mental_status_imp as source of truth.
-    comatose_imp = mental_status_imp == "Comatose" |
-      (comatose_imp & !(mental_status_imp == "Normal")),
-    ## Delirium, normal are more straightforward - must match mental_status_imp
-    delirious_imp = mental_status_imp == "Delirious",
-    normal_imp = mental_status_imp == "Normal",
-    braindys_imp = mental_status_imp %in% c("Comatose", "Delirious")
-  )
-
 ## -- Figure out RASS level at the time of randomization -----------------------
 ## Tried matching by exact time of PAD assessment, but >100 patients had no RASS
-## available by that means. New tactic: First available assessment within 2hr
+## available by that means. New tactic: First available assessment within 5hr
 ## before/after randomization.
+## Note: Though we imputed RASS earlier, we did not impute assessment *times*
+##  for those RASSes. We use raw RASS data here.
 
 ## Get all PAD assessments within X hours before/after time of randomization
 within_hrs_rand <- 5
@@ -471,13 +563,13 @@ rand_asmts <- pad_long %>%
     as.numeric(difftime(randomization_time, assess_time, units = "hours"))
   )) %>%
   ## We want non-missing, non-comatose RASSes within 5 hours of randomization
-  filter(!is.na(rass) & rass >= -3 & hrs_btwn_random) %>%
+  filter(!is.na(rass_raw) & rass_raw >= -3 & hrs_btwn_random) %>%
   ## Take non-missing RASS closest to randomization time per pt (before/after)
   arrange(id, hrs_btwn_random) %>%
   group_by(id) %>%
   slice(1) %>%
   ungroup() %>%
-  rename(rass_rand = "rass") %>%
+  rename(rass_rand = "rass_raw") %>%
   select(id, rass_rand)
 
 # ## Write CSV of patients whose "first CAM+" is not on the date of randomization
@@ -511,7 +603,7 @@ pad_int <- pad_daily %>%
   )
 
 ## Summarize mental status variables for each patient
-## NOTE: All mental status summary variables use **imputed** mental status
+## NOTE: All mental status summary variables use **imputed** variables
 pad_summary_int <- pad_int %>%
   group_by(id) %>%
   summarise(
@@ -519,6 +611,7 @@ pad_summary_int <- pad_int %>%
     ##  coma status more frequently than we can determine delirium/overall
     n_coma_avail_int = sum(!is.na(comatose_imp)),
     n_mental_avail_int = sum(!is.na(mental_status_imp)),
+    n_hyperdel_avail_int = sum(!is.na(hyperdel_imp)), ## same for hypoactive
     n_dcfree_avail_int = sum(!is.na(dcfree)),
     n_dcfree_unavail_int = sum(is.na(dcfree)),
     
@@ -529,6 +622,10 @@ pad_summary_int <- pad_int %>%
     ever_del_int = ifelse(is.na(del_int_all), NA, del_int_all > 0),
     delcoma_int_all = ifelse(n_mental_avail_int == 0, NA, sum_na(braindys_imp)),
     ever_delcoma_int = ifelse(is.na(delcoma_int_all), NA, delcoma_int_all > 0),
+    hyperdel_int_all = ifelse(n_hyperdel_avail_int == 0, NA, sum_na(hyperdel_imp)),
+    hypodel_int_all = ifelse(n_hyperdel_avail_int == 0, NA, sum_na(hypodel_imp)),
+    ever_hyperdel_int = ifelse(is.na(hyperdel_int_all), NA, hyperdel_int_all > 0),
+    ever_hypodel_int = ifelse(is.na(hypodel_int_all), NA, hypodel_int_all > 0),
     
     ## Among patients who ever experienced coma/delirium
     coma_int_exp =
@@ -537,12 +634,18 @@ pad_summary_int <- pad_int %>%
       ifelse(is.na(del_int_all) | del_int_all == 0, NA, del_int_all),
     delcoma_int_exp =
       ifelse(is.na(delcoma_int_all) | delcoma_int_all == 0, NA, delcoma_int_all),
+    hyperdel_int_exp =
+      ifelse(is.na(hyperdel_int_all) | hyperdel_int_all == 0, NA, hyperdel_int_all),
+    hypodel_int_exp =
+      ifelse(is.na(hypodel_int_all) | hypodel_int_all == 0, NA, hypodel_int_all),
     
     ## Everyone has a value for DCFDs; no need to do _all, _exp versions
     dcfd_int = ifelse(n_dcfree_avail_int == 0, NA, sum_na(dcfree))
   ) %>%
   select(id, n_coma_avail_int, ever_coma_int, coma_int_all, coma_int_exp,
          n_mental_avail_int, ever_del_int, del_int_all, del_int_exp,
+         ever_hyperdel_int, hyperdel_int_all, hyperdel_int_exp,
+         ever_hypodel_int, hypodel_int_all, hypodel_int_exp,
          ever_delcoma_int, delcoma_int_all, delcoma_int_exp,
          n_dcfree_avail_int, dcfd_int)
 
@@ -557,6 +660,7 @@ pad_summary_ih <- pad_daily %>%
     ## Because RASS was sometimes available when CAM was not, we can determine
     ##  coma status more frequently than we can determine delirium/overall
     n_coma_avail_ih = sum(!is.na(comatose_imp)),
+    n_hyperdel_avail_ih = sum(!is.na(hyperdel_imp)), ## same for hypoactive
     n_mental_avail_ih = sum(!is.na(mental_status_imp)),
 
     ## Among all patients
@@ -564,6 +668,10 @@ pad_summary_ih <- pad_daily %>%
     ever_coma_ih = ifelse(is.na(coma_ih_all), NA, coma_ih_all > 0),
     del_ih_all = ifelse(n_mental_avail_ih == 0, NA, sum_na(delirious_imp)),
     ever_del_ih = ifelse(is.na(del_ih_all), NA, del_ih_all > 0),
+    hyperdel_ih_all = ifelse(n_hyperdel_avail_ih == 0, NA, sum_na(hyperdel_imp)),
+    ever_hyperdel_ih = ifelse(is.na(hyperdel_ih_all), NA, hyperdel_ih_all > 0),
+    hypodel_ih_all = ifelse(n_hyperdel_avail_ih == 0, NA, sum_na(hypodel_imp)),
+    ever_hypodel_ih = ifelse(is.na(hypodel_ih_all), NA, hypodel_ih_all > 0),
     delcoma_ih_all = ifelse(n_mental_avail_ih == 0, NA, sum_na(braindys_imp)),
     ever_delcoma_ih = ifelse(is.na(delcoma_ih_all), NA, delcoma_ih_all > 0),
     
@@ -574,11 +682,17 @@ pad_summary_ih <- pad_daily %>%
       ifelse(is.na(coma_ih_all) | coma_ih_all == 0, NA, coma_ih_all),
     del_ih_exp =
       ifelse(is.na(del_ih_all) | del_ih_all == 0, NA, del_ih_all),
+    hyperdel_ih_exp =
+      ifelse(is.na(hyperdel_ih_all) | hyperdel_ih_all == 0, NA, hyperdel_ih_all),
+    hypodel_ih_exp =
+      ifelse(is.na(hypodel_ih_all) | hypodel_ih_all == 0, NA, hypodel_ih_all),
     delcoma_ih_exp =
       ifelse(is.na(delcoma_ih_all) | delcoma_ih_all == 0, NA, delcoma_ih_all)
   ) %>%
   select(id, n_coma_avail_ih, ever_coma_ih, coma_ih_all, coma_ih_exp,
          n_mental_avail_ih, ever_del_ih, del_ih_all, del_ih_exp,
+         ever_hyperdel_ih, hyperdel_ih_all, hyperdel_ih_exp,
+         ever_hypodel_ih, hypodel_ih_all, hypodel_ih_exp,
          ever_delcoma_ih, delcoma_ih_all, delcoma_ih_exp)
 
 ## -- Write datasets to analysisdata -------------------------------------------
