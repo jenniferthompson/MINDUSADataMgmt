@@ -116,6 +116,9 @@ noncompliance_df <- right_join(
   trt_df %>% dplyr::select(id, trt), noncompliance_df, by = "id"
 )
 
+## Remove assessment time to padasmts_df
+padasmts_df <- padasmts_df %>% dplyr::select(-assess_time)
+
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
 save(ptstatus_df, rand_df, rand_pts,
      ptsummary_all_df, daily_all_df,
