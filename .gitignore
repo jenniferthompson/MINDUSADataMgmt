@@ -1,5 +1,6 @@
 # Data files contain PHI, should never be public
 analysisdata/
+rawdata/
 *.csv
 *.txt
 
