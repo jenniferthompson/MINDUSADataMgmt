@@ -115,6 +115,8 @@ noncompliance_df <- right_join(trt_df, noncompliance_df, by = "id")
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
 save(ptstatus_df, rand_df, rand_pts,
      ptsummary_all_df, daily_all_df,
-     ptsummary_df, daily_int_df, doses_df, ptdrug_df,
+     ptsummary_df, daily_int_df,
+     padasmts_df, ## need these to describe missingness/imputation
+     doses_df, ptdrug_df,
      torsades_df, noncompliance_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")
