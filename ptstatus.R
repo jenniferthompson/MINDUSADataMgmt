@@ -36,6 +36,15 @@ exc_raw <- import_df(
 ## -- Download variables needed to determine patient status at enrollment, -----
 ## -- disqualification, randomization, discharge -------------------------------
 
+## From treatment key: IDs and randomization numbers ONLY
+## (Treatment assignments are kept totally out of this script)
+rand_list <- readxl::read_excel(
+  path = "rawdata/MIND-USAUnblinding.xlsx",
+  range = cell_cols(1:2)
+) %>%
+  set_names("id", "rand_num") %>%
+  mutate(rand_list = TRUE)
+
 ## From enrollment qualification form: All variables
 ## From prehospital form: Only IQCODE (patient should be excluded if >= 4.5)
 iqcode_vars <- sprintf("iqcode_%s_ph", 1:16)
@@ -361,6 +370,7 @@ exclusion_rsns <-
 
 ## Create indicators
 ptstatus_df <- ptstatus_df %>%
+  left_join(rand_list, by = "id") %>%
   mutate(
     ## Screened: met inclusion criteria & screened within 72h, *or* had
     ##   randomization time
@@ -408,6 +418,16 @@ ptstatus_df <- ptstatus_df %>%
     ##   never excluded, not randomized + DQ time entered
     disqualified = screened & approached & !refused & !excluded_ever &
       consented & !randomized_yn & !is.na(disqualification_time),
+    
+    ## Randomization *list*: Took up a spot in randomization scheme
+    ## These IDs are taken directly from the randomization list provided by the
+    ## investigational pharmacy. There are four patients who have a
+    ## randomization slot, but were never intended to receive treatment per
+    ## site coordinators, and did not have outcomes tracked. These patients will
+    ## not be included in ITT population, but we will describe the situation
+    ## in the report.
+    rand_list = ifelse(is.na(rand_list), FALSE, rand_list),
+    
     ## Randomized: screened, approached, did not refuse, consented,
     ##   randomized + time recorded
     randomized = screened & approached & !refused & consented & !excluded_ever &
@@ -634,7 +654,7 @@ ptstatus_df <- ptstatus_df %>%
          exc_month, exc_year, matches("^exc\\_[0-9]+"), exc_other,
          inc_month, inc_year, approached, refused,
          enroll_mv, enroll_nippv, enroll_shock,
-         consented, enroll_month, enroll_year,
+         consented, enroll_month, enroll_year, rand_list,
          randomized, randomized_month, randomized_year,
          rand_mv, rand_nippv, rand_shock,
          disqualified, randomized_no_reason,
