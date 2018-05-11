@@ -109,8 +109,12 @@ daily_int_df <- reduce(
 )
 
 ## Add treatment group to Torsades, protocol noncompliance info
-torsades_df <- right_join(trt_df, torsades_df, by = "id")
-noncompliance_df <- right_join(trt_df, noncompliance_df, by = "id")
+torsades_df <- right_join(
+  trt_df %>% dplyr::select(id, trt), torsades_df, by = "id"
+)
+noncompliance_df <- right_join(
+  trt_df %>% dplyr::select(id, trt), noncompliance_df, by = "id"
+)
 
 ## -- Save datasets to final RCT .Rdata file -----------------------------------
 save(ptstatus_df, rand_df, rand_pts,
