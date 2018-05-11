@@ -26,22 +26,23 @@ safetydaily_df   <- readRDS("analysisdata/rds/safetydaily.rds")
 safetysummary_df <- readRDS("analysisdata/rds/safetysummary.rds")
 torsades_df      <- readRDS("analysisdata/rds/torsadesaes.rds")
 noncompliance_df <- readRDS("analysisdata/rds/noncompliance.rds")
+trt_df           <- readRDS("analysisdata/rds/trt.rds")
 
-## -- Temporary: Create dataset of fake treatment groups -----------------------
-## Final treatment groups will be added once data clean is finalized, database
-## is "locked" & final treatment groups received from investigational pharmacist
-
-## Create data frame with only IDs and treatment groups
-rand_pts <- sort(unique(subset(ptstatus_df, randomized)$id))
-trt_df <- data.frame(
-  id = rand_pts,
-  trt = sample(
-    LETTERS[1:3],
-    size = length(rand_pts),
-    prob = rep(1/3, 3),
-    replace = TRUE
-  )
-)
+# ## -- Temporary: Create dataset of fake treatment groups -----------------------
+# ## Final treatment groups will be added once data clean is finalized, database
+# ## is "locked" & final treatment groups received from investigational pharmacist
+# 
+# ## Create data frame with only IDs and treatment groups
+# rand_pts <- sort(unique(subset(ptstatus_df, randomized)$id))
+# trt_df <- data.frame(
+#   id = rand_pts,
+#   trt = sample(
+#     LETTERS[1:3],
+#     size = length(rand_pts),
+#     prob = rep(1/3, 3),
+#     replace = TRUE
+#   )
+# )
 
 ## -- Idea here: Combine datasets, then restrict to only variables we need -----
 ## -- for main RCT analysis ----------------------------------------------------
@@ -83,7 +84,7 @@ daily_all_df <- reduce(
 ## One record per randomized patient with baseline, summary variables
 ptsummary_df <- reduce(
   list(
-    ptsummary_all_df %>% filter(randomized) %>% left_join(rand_df, by = "id"),
+    ptsummary_all_df %>% filter(randomized),
     datestrack_df,
     padsummary_df,
     dailysummary_df,
@@ -97,7 +98,7 @@ ptsummary_df <- reduce(
 ## One record per day after randomization, including post-discharge/death
 daily_int_df <- reduce(
   list(
-    randptevents_df %>% left_join(trt_df, by = "id"),
+    randptevents_df,
     paddaily_df,
     dailydata_df,
     safetydaily_df,
