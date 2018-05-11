@@ -970,14 +970,47 @@ baseline$apache_aps_adm_only <- ifelse(
   rowSums(baseline[, vars_apache_aps_adm], na.rm = TRUE)
 )
 
+## -- Antipsychotics between ICU admission and consent -------------------------
+## Includes >=1 of: aripiprazole, droperidol, haloperidol, olanzapine,
+##   olanz/fluox, quetiapine, risperidone, ziprasidone
+## Just want yes/no (unless reviewers ask for doses)
+## These are stored as dropdowns in `med_x_enr`; up to 8 meds possible
+
+antipsyc_meds <- c(
+  "Aripiprazole", "Droperidol", "Haloperidol", "Olanzapine",
+  "Olanzapine/Fluoxetine", "Quetiapine", "Risperidone", "Ziprasidone"
+)
+
+meds_admconsent <- baseline %>%
+  dplyr::select(id, matches("^med\\_[0-9]\\_enr$")) %>%
+  ## Convert numeric codes to medication names
+  mutate_at(
+    vars(matches("^med\\_[0-9]\\_enr$")),
+    ~ factor(
+      .,
+      levels = get_levels_ih("med_1_enr"),
+      labels = names(get_levels_ih("med_1_enr"))
+    )
+  ) %>%
+  gather(key = med_num, value = med_name, med_1_enr:med_8_enr) %>%
+  group_by(id) %>%
+  summarise(antipsyc_adm = sum_na(med_name %in% antipsyc_meds) > 0)
+
 ## -- Combine prehospital, baseline datasets and save to analysisdata ----------
-adm_df <- left_join(
-  select(baseline, id, age_consent, gender, race_cat, ethnicity, insurance,
-         height, weight, bmi, home_antipsyc, charlson_total, frailty,
-         frailty_f, icu_rsn, icu_rsn_other, apache_adm, apache_adm_only,
-         apache_aps_adm, apache_aps_adm_only, sofa_adm, sofa_adm_only,
-         sofa_mod_adm, sofa_mod_adm_only, cv_sofa_adm_f),
-  ph_form,
+adm_df <- reduce(
+  list(
+    dplyr::select(
+      baseline,
+      id, age_consent, gender, race_cat, ethnicity, insurance, height, weight,
+      bmi, home_antipsyc, charlson_total, frailty, frailty_f, icu_rsn,
+      icu_rsn_other, apache_adm, apache_adm_only, apache_aps_adm,
+      apache_aps_adm_only, sofa_adm, sofa_adm_only, sofa_mod_adm,
+      sofa_mod_adm_only, cv_sofa_adm_f
+    ),
+    meds_admconsent,
+    ph_form
+  ),
+  left_join,
   by = "id")
 
 saveRDS(adm_df, file = "analysisdata/rds/admission.rds")
