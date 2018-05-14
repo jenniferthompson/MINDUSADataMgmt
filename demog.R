@@ -996,6 +996,31 @@ meds_admconsent <- baseline %>%
   group_by(id) %>%
   summarise(antipsyc_adm = sum_na(med_name %in% antipsyc_meds) > 0)
 
+## -- Indicator for medical vs surgical patient --------------------------------
+## Surgical patients meet at least one of the following criteria, following
+## team discussion spring 2018:
+## - Have a recorded primary ICU admission reason involving surgery
+##    (look for "surgery: in icu_rsn)
+## - Had emergency or elective surgery between hospital admission and ICU
+##    admission (apache_chronic_points = Emergency postoperative or Elective
+##    postoperative)
+## - Went to OR between ICU admission and study enrollment (emer_surg = Yes)
+baseline <- baseline %>%
+  mutate(
+    med_surg = factor(
+      case_when(
+        str_detect(icu_rsn, "surgery")   ~ 2,
+        apache_chronic_points > 0        ~ 2,
+        emer_surg == 1                   ~ 2,
+        is.na(icu_rsn) &
+          is.na(apache_chronic_points) &
+          is.na(emer_surg)               ~ as.numeric(NA),
+        TRUE                             ~ 1
+      ),
+      levels = 1:2, labels = c("Medical", "Surgical")
+    )
+  )
+
 ## -- Combine prehospital, baseline datasets and save to analysisdata ----------
 adm_df <- reduce(
   list(
@@ -1003,7 +1028,7 @@ adm_df <- reduce(
       baseline,
       id, age_consent, gender, race_cat, ethnicity, insurance, height, weight,
       bmi, home_antipsyc, charlson_total, frailty, frailty_f, icu_rsn,
-      icu_rsn_other, apache_adm, apache_adm_only, apache_aps_adm,
+      icu_rsn_other, med_surg, apache_adm, apache_adm_only, apache_aps_adm,
       apache_aps_adm_only, sofa_adm, sofa_adm_only, sofa_mod_adm,
       sofa_mod_adm_only, cv_sofa_adm_f
     ),
