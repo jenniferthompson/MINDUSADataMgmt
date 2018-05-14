@@ -26,7 +26,7 @@ safetydaily_df   <- readRDS("analysisdata/rds/safetydaily.rds")
 safetysummary_df <- readRDS("analysisdata/rds/safetysummary.rds")
 torsades_df      <- readRDS("analysisdata/rds/torsadesaes.rds")
 noncompliance_df <- readRDS("analysisdata/rds/noncompliance.rds")
-trt_df           <- readRDS("analysisdata/rds/trt.rds")
+trt_df           <- readRDS("analysisdata/rds/trt.rds") ## not in fake_make.R
 
 # ## -- Temporary: Create dataset of fake treatment groups -----------------------
 # ## Final treatment groups will be added once data clean is finalized, database
