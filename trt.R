@@ -14,7 +14,7 @@ library(readxl)
 ## -- Read in treatment assignments, stored in xlsx file -----------------------
 trts <- readxl::read_excel(
   path = "rawdata/MIND-USAUnblinding.xlsx",
-  range = cell_cols(1:3)
+  range = readxl::cell_cols(1:3)
 ) %>%
   set_names("id", "rand_num", "trt")
 
