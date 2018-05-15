@@ -265,16 +265,14 @@ mv_dates <- dates_df %>%
   unite(mv_instance, c(mv_type, mv_instance)) %>%
   spread(key = mv_which, value = mv_time) %>%
   rename_at(vars(start, stop), funs(paste0("mv_", .))) %>%
-  mutate_at(
-    vars(mv_start, mv_stop),
-    as.POSIXct, origin = "1970-1-1 00:00", tz = "UTC"
-  ) %>%
-  
+  mutate_at(vars(mv_start, mv_stop), as_datetime) %>%
+
   ## Add enrollment, randomization, death, last in-hospital times
   left_join(
     dplyr::select(
       dates_df,
-      id, randomization_time, hospdis_noinfo, death_time, last_inhosp_time
+      id, randomization_time, hospdis_noinfo, death_time, last_inhosp_time,
+      hospdis_vent
     ),
     by = "id"
   ) %>%
@@ -288,7 +286,7 @@ mv_dates <- dates_df %>%
       TRUE            ~ last_inhosp_time
     )
   ) %>%
-  select(-last_inhosp_time) %>%
+  # select(-last_inhosp_time) %>%
 
   ## Restrict to only MV instances which overlap or come after randomization
   filter(
@@ -332,10 +330,17 @@ mv_dates <- dates_df %>%
     ),
     
     ## Calculate time between discontinuation of MV and reinitiation/death;
-    ## if there is no next initiation recorded, use Inf
-    time_off_mv = ifelse(is.na(next_mv_start),
-                         Inf,
-                         days_diff(next_mv_start, mv_stop_final)),
+    time_off_mv = case_when(
+      ## For patients who were confirmed discharged on MV, or for the 5 patients
+      ## who were discharged on MV per dates but not confirmed by study staff,
+      ## assign "time off MV" of 0
+      is.na(next_mv_start) &
+        (hospdis_vent == "Yes" | mv_stop_final == last_inhosp_time) ~ 0,
+      ## If there is no next initiation recorded, but patient was not on MV at
+      ##  discharge, use Inf
+      is.na(next_mv_start) & (is.na(hospdis_vent) | hospdis_vent == "No") ~ Inf,
+      TRUE ~ days_diff(next_mv_start, mv_stop_final)
+    ),
     
     ## Indicator for whether discontinuation was "successful"
     ##  (MV actually discontinued, and >48 hours between discontinuation and
