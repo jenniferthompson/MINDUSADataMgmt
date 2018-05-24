@@ -19,6 +19,7 @@ ih_mapping <- get_event_mapping("MINDUSA_IH_TOKEN")
 
 ## -- Download randomization info ----------------------------------------------
 ptstatus_df <- readRDS("analysisdata/rds/ptstatus.rds")
+rand_df <- readRDS("analysisdata/rds/trt.rds")
 
 ## Vector of all randomized patients never excluded
 rand_pts <- ptstatus_df %>%
@@ -118,7 +119,7 @@ doses_df <- drug_raw %>%
   separate(drug_var, into = c("drug_var", "dose_num"), sep = "\\_(?=[0-9]$)") %>%
   spread(key = drug_var, value = drug_val) %>%
   ## Renaming for length/sense
-  rename(dose_amt = "dose",
+  rename(dose_ml = "dose",
          dose_type = "dose_given_yes",
          dose_permdc_reason = "permanent_stop_why") %>%
   mutate(
@@ -128,8 +129,8 @@ doses_df <- drug_raw %>%
       labels = names(get_levels_ih("study_drug_given_1"))
     ),
     dose_dttm = ymd_hm(dose_datetime),
-    dose_amt = factor(
-      dose_amt,
+    dose_ml = factor(
+      dose_ml,
       levels = get_levels_ih("dose_1"),
       labels = names(get_levels_ih("dose_1"))
     ),
@@ -170,7 +171,7 @@ doses_df <- drug_raw %>%
     ## Numeric versions of QTc, dose amount; dose units are mL, don't need that
     pre_dose_qtc = as.numeric(pre_dose_qtc),
     post_dose_qtc = as.numeric(post_dose_qtc),
-    dose_amt = as.numeric(gsub(" mL", "", dose_amt)),
+    dose_ml = as.numeric(gsub(" mL", "", dose_ml)),
     ## -- Create T/F indicators for each dose ----------------------------------
     ## Was drug given?
     drug_given = study_drug_given == "Yes",
@@ -229,11 +230,20 @@ doses_df <- drug_raw %>%
       dose_permdc_reason == "Physician refused further study drug administration",
     permdc_other = drug_permdc & dose_permdc_reason == "Other"
   ) %>%
+  ## Merge on treatment group and calculate dose amount in mg
+  left_join(rand_df %>% dplyr::select(id, trt), by = "id") %>%
+  mutate(
+    dose_mg = case_when(
+      !is.na(dose_ml) & trt == "Haloperidol" ~ dose_ml * 5,
+      !is.na(dose_ml) & trt == "Ziprasidone" ~ dose_ml * 10,
+      TRUE ~ as.numeric(NA)
+    )
+  ) %>%
   ## Reorder columns
   select(
     id, redcap_event_name, dose_num, drug_given,
     ## Dose, QTc/ECG info
-    dose_dttm, dose_amt, dose_type, dose_type_other,
+    dose_dttm, dose_ml, dose_mg, dose_type, dose_type_other,
     pre_dose_qtc, ecg_ordered, ecg_result, post_dose_qtc,
     ## Hold info
     drug_held, dose_held_reason, matches("^held\\_[a-z]+$"), held_other_exp,
@@ -250,17 +260,24 @@ ptdays_df <- doses_df %>%
   group_by(id, redcap_event_name) %>%
   summarise(
     drug_given_day = sum_na(drug_given) > 0,
-    total_drug_daily = sum_na(dose_amt)
+    total_drug_daily_ml = sum_na(dose_ml),
+    total_drug_daily_mg = sum_na(dose_mg)
   ) %>%
   mutate(
-    total_drug_daily = ifelse(total_drug_daily == 0, NA, total_drug_daily)
+    total_drug_daily_ml =
+      ifelse(total_drug_daily_ml == 0, NA, total_drug_daily_ml),
+    total_drug_daily_mg =
+      ifelse(total_drug_daily_mg == 0, NA, total_drug_daily_mg)
   ) %>%
   ungroup %>%
   ## How many days did the patient get drug? What was average total daily dose?
   group_by(id) %>%
   summarise(
     num_drug_days = sum_na(drug_given_day),
-    mean_drug_daily = ifelse(num_drug_days == 0, NA, mean_na(total_drug_daily))
+    mean_drug_daily_ml =
+      ifelse(num_drug_days == 0, NA, mean_na(total_drug_daily_ml)),
+    mean_drug_daily_mg =
+      ifelse(num_drug_days == 0, NA, mean_na(total_drug_daily_mg))
   ) %>%
   ungroup
 
@@ -273,13 +290,23 @@ ptdoses_df <- doses_df %>%
     num_drug_doses = sum_na(drug_given),
     
     ## Describe drug dose amounts
-    max_drug_dose = ifelse(num_drug_doses > 0, max_na(dose_amt), NA),
-    min_drug_dose = ifelse(num_drug_doses > 0, min_na(dose_amt), NA),
-    q25_drug_dose = ifelse(num_drug_doses > 0, q25(dose_amt), NA),
-    q50_drug_dose = ifelse(num_drug_doses > 0, q50(dose_amt), NA),
-    q75_drug_dose = ifelse(num_drug_doses > 0, q75(dose_amt), NA),
-    mean_drug_dose = ifelse(num_drug_doses > 0, mean_na(dose_amt), NA),
-    sd_drug_dose = ifelse(num_drug_doses > 0, sd_na(dose_amt), NA),
+    max_drug_dose_ml = ifelse(num_drug_doses > 0, max_na(dose_ml), NA),
+    min_drug_dose_ml = ifelse(num_drug_doses > 0, min_na(dose_ml), NA),
+    q25_drug_dose_ml = ifelse(num_drug_doses > 0, q25(dose_ml), NA),
+    q50_drug_dose_ml = ifelse(num_drug_doses > 0, q50(dose_ml), NA),
+    q75_drug_dose_ml = ifelse(num_drug_doses > 0, q75(dose_ml), NA),
+    mean_drug_dose_ml = ifelse(num_drug_doses > 0, mean_na(dose_ml), NA),
+    sd_drug_dose_ml = ifelse(num_drug_doses > 0, sd_na(dose_ml), NA),
+    total_drug_dose_ml = ifelse(num_drug_doses > 0, sum_na(dose_ml), NA),
+    
+    max_drug_dose_mg = ifelse(num_drug_doses > 0, max_na(dose_mg), NA),
+    min_drug_dose_mg = ifelse(num_drug_doses > 0, min_na(dose_mg), NA),
+    q25_drug_dose_mg = ifelse(num_drug_doses > 0, q25(dose_mg), NA),
+    q50_drug_dose_mg = ifelse(num_drug_doses > 0, q50(dose_mg), NA),
+    q75_drug_dose_mg = ifelse(num_drug_doses > 0, q75(dose_mg), NA),
+    mean_drug_dose_mg = ifelse(num_drug_doses > 0, mean_na(dose_mg), NA),
+    sd_drug_dose_mg = ifelse(num_drug_doses > 0, sd_na(dose_mg), NA),
+    total_drug_dose_mg = ifelse(num_drug_doses > 0, sum_na(dose_mg), NA),
     
     ## Indicator for whether drug was ever temporarily held
     ever_drug_held = sum_na(drug_held) > 0,
@@ -349,7 +376,7 @@ ptdrug_df <- reduce(
   mutate_at(
     vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
   ) %>%
-  select(id, ever_studydrug, num_drug_days, mean_drug_daily,
+  select(id, ever_studydrug, num_drug_days, starts_with("mean_drug_daily"),
          num_drug_doses:times_drug_held, ever_held_qtc, times_held_qtc,
          ever_held_oversed, times_held_oversed, ever_held_eps, times_held_eps,
          ever_held_dystonia, times_held_dystonia, ever_held_ae, times_held_ae,
