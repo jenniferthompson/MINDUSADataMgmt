@@ -249,20 +249,6 @@ baseline <- baseline %>%
       ifelse(num_home_antipsyc > 0, 2, NA)),
       levels = 1:2, labels = c("None", "At least one")
     )
-    ## Primary admission diagnosis (TBD pending PI input); one suggestion:
-    # Sepsis, septic shock, ARDS d/t infection (1, 2)
-    # ARDS without infection, airway issues (3, 4)
-    # COPD/asthma (5)
-    # Other pulmonary (6)
-    # CHF/cardiomyopathy, acute MI/cardiogenic shock, arrhythmia (7, 8, 9)
-    # GI bleed, hemorrhagic shock (10, 12)
-    # Renal failure, cirrhosis/hepatic failure, metabolic/endocrine/electrolyte (11, 13, 15)
-    # Other infectious disease (14)
-    # Malignancy (16)
-    # Seizures/status eplepticus, neurological disease (17, 18)
-    # Non-transplant surgery (19, 20, 22 - 27)
-    # Transplant (21)
-    # Any other (99)
   )
 
 ## -- More complicated variables -----------------------------------------------
