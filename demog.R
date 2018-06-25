@@ -982,7 +982,7 @@ meds_admconsent <- baseline %>%
   group_by(id) %>%
   summarise(antipsyc_adm = sum_na(med_name %in% antipsyc_meds) > 0)
 
-## -- Indicator for medical vs surgical patient --------------------------------
+## -- Indicators related to ICU admission reason -------------------------------
 ## Surgical patients meet at least one of the following criteria, following
 ## team discussion spring 2018:
 ## - Have a recorded primary ICU admission reason involving surgery
@@ -991,10 +991,13 @@ meds_admconsent <- baseline %>%
 ##    admission (apache_chronic_points = Emergency postoperative or Elective
 ##    postoperative)
 ## - Went to OR between ICU admission and study enrollment (emer_surg = Yes)
+## Sepsis at ICU admission defined solely by primary ICU admission reason
+##  (finalized June 2018).
 baseline <- baseline %>%
   mutate(
     med_surg = factor(
       case_when(
+        is.na(icu_rsn)                   ~ as.numeric(NA),
         str_detect(icu_rsn, "surgery")   ~ 2,
         apache_chronic_points > 0        ~ 2,
         emer_surg == 1                   ~ 2,
@@ -1004,6 +1007,14 @@ baseline <- baseline %>%
         TRUE                             ~ 1
       ),
       levels = 1:2, labels = c("Medical", "Surgical")
+    ),
+    sepsis_adm = factor(
+      case_when(
+        is.na(icu_rsn)                   ~ as.numeric(NA),
+        icu_rsn == "Sepsis/Septic shock" ~ 1,
+        TRUE                             ~ 0
+      ),
+      levels = 0:1, labels = c("Non-septic", "Sepsis/septic shock")
     )
   )
 
@@ -1014,9 +1025,9 @@ adm_df <- reduce(
       baseline,
       id, age_consent, gender, race_cat, ethnicity, insurance, height, weight,
       bmi, home_antipsyc, charlson_total, frailty, frailty_f, icu_rsn,
-      icu_rsn_other, med_surg, apache_adm, apache_adm_only, apache_aps_adm,
-      apache_aps_adm_only, sofa_adm, sofa_adm_only, sofa_mod_adm,
-      sofa_mod_adm_only, cv_sofa_adm_f
+      icu_rsn_other, med_surg, sepsis_adm, apache_adm, apache_adm_only,
+      apache_aps_adm, apache_aps_adm_only, sofa_adm, sofa_adm_only,
+      sofa_mod_adm, sofa_mod_adm_only, cv_sofa_adm_f
     ),
     meds_admconsent,
     ph_form
