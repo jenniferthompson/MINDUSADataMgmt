@@ -65,6 +65,17 @@ daily_raw <- import_df(
 ## For each day, reshape data to one record per drug given, get total of each
 ## drug, and reshape back to one record per day.
 
+## Prep: Create dummy data.frame with one record per day per possible medication
+
+## Wrapper function to use in map()
+make_med_long <- function(df, med){ df %>% mutate(med_name = med) }
+
+dummy_meds <- map_df(
+  1:18, ## We collected 18 medications on a daily basis
+  make_med_long,
+  df = subset(daily_raw, select = c(id, redcap_event_name))
+)
+
 med_df <- daily_raw %>%
   ## Reshaping to long format
   select(id, redcap_event_name, matches("^daily\\_med\\_[1-9]+[\\_amt]*$")) %>%
@@ -73,6 +84,13 @@ med_df <- daily_raw %>%
   mutate(amt_not = ifelse(is.na(amt_not), "med_name", paste0("med_", amt_not))) %>%
   select(-matches("^junk")) %>%
   spread(key = amt_not, value = med_value) %>%
+  
+  ## Add dummy meds on to make sure everyone is counted
+  filter(!is.na(med_amt)) %>%
+  right_join(dummy_meds, by = c("id", "redcap_event_name", "med_name")) %>%
+  
+  ## If amount is NA, assume none was given
+  mutate(med_amt = coalesce(med_amt, 0)) %>%
   
   ## Make factor out of med_name; all daily_med_xxxx variables have same levels
   mutate(
@@ -99,8 +117,6 @@ med_df <- daily_raw %>%
   
   ## Merge on drug abbreviations
   left_join(icudel_meds, by = "med_name") %>%
-  ## Keep only drugs given
-  filter(!is.na(med_abbrev)) %>%
   mutate(med_abbrev = paste0("daily_", med_abbrev)) %>%
   select(-med_name) %>%
 
