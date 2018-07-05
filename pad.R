@@ -241,9 +241,8 @@ pad_forimputation <- pad_long %>%
 ## - Set seed for reproducibility
 ## - Need only one final dataset
 
-## Keep the furrr package in mind once it hits CRAN!
-##  https://github.com/DavisVaughan/furrr
-##  Use case: http://www.brodrigues.co/blog/2018-04-14-playing_with_furrr/
+## May eventually use furrr, a la
+##  http://www.brodrigues.co/blog/2018-04-14-playing_with_furrr/
 
 asmt_mice <- mice(
   data = pad_forimputation,
