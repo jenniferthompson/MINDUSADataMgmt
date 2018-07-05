@@ -109,22 +109,19 @@ med_df <- daily_raw %>%
     )
   ) %>%
   
-  ## Just in case a drug got entered twice on the same day: final drug doses per
-  ## day = total of each (this removed four rows)
+  ## To combine all olanzapine + olanzapine/fluoxetine, or in case a drug got
+  ## entered twice on the same day (3x): final drug doses per day = total of each
   group_by(id, redcap_event_name, med_name) %>%
   summarise(med_total = sum_na(med_amt)) %>%
   ungroup() %>%
   
-  ## Merge on drug abbreviations
-  left_join(icudel_meds, by = "med_name") %>%
+  ## Merge on drug abbreviations (not including blood products)
+  left_join(icudel_meds %>% filter(!is.na(med_abbrev)), by = "med_name") %>%
   mutate(med_abbrev = paste0("daily_", med_abbrev)) %>%
   select(-med_name) %>%
 
   ## Reshape back to wide format, one record per day with one column per med
   spread(key = med_abbrev, value = med_total) %>%
-  
-  ## Assume that if no dose is recorded, patient got none that day
-  mutate_at(vars(starts_with("daily_")), funs(ifelse(is.na(.), 0, .))) %>%
   
   ## Calculate total benzodiazepines, opioids, open-label antipsychotics
   ## (Reference formulas for conversions stored in Google Sheet)
