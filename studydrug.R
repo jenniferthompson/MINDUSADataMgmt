@@ -167,6 +167,12 @@ doses_df <- drug_raw %>%
   ) %>%
   ## Only want doses which were entered in the database
   filter(!is.na(study_drug_given)) %>%
+  ## Indicator for whether *last dose* was given
+  group_by(id) %>%
+  mutate(
+    last_dose_given = lag(study_drug_given == "Yes")
+  ) %>%
+  ungroup() %>%
   mutate(
     ## Numeric versions of QTc, dose amount; dose units are mL, don't need that
     pre_dose_qtc = as.numeric(pre_dose_qtc),
@@ -200,7 +206,15 @@ doses_df <- drug_raw %>%
               "Patient's status is comfort measures only/hospice")) ~ TRUE,
       TRUE ~ FALSE
     ),
-    
+
+    ## Was permanent discontinuation immediately following a dose *given*?
+    drug_permdc_active = case_when(
+      !drug_permdc                              ~ FALSE,
+      !is.na(last_dose_given) & last_dose_given ~ TRUE,
+      is.na(last_dose_given) | !last_dose_given ~ FALSE,
+      TRUE                                      ~ as.logical(NA)
+    ),
+
     ## If drug held or discontinued, indicators for why
     held_qtc = drug_held &
       dose_held_reason == "QTc Prolongation (>=500 ms or >=550 protocol v1.09)",
@@ -218,17 +232,31 @@ doses_df <- drug_raw %>%
     
     permdc_nms = drug_permdc &
       dose_permdc_reason == "Neuroleptic malignant syndrome (NMS)",
+    permdc_active_nms = drug_permdc_active &
+      dose_permdc_reason == "Neuroleptic malignant syndrome (NMS)",
     permdc_react = drug_permdc &
       dose_permdc_reason == "Drug Reaction with Eosinophilia and Systemic Symptoms (DRESS)",
+    permdc_active_react = drug_permdc_active &
+      dose_permdc_reason == "Drug Reaction with Eosinophilia and Systemic Symptoms (DRESS)",
     permdc_torsades = drug_permdc & dose_permdc_reason == "Torsades de pointes",
+    permdc_active_torsades = drug_permdc_active &
+      dose_permdc_reason == "Torsades de pointes",
     permdc_coma = drug_permdc &
       dose_permdc_reason == "Coma due to a structural brain disease",
+    permdc_active_coma = drug_permdc_active &
+      dose_permdc_reason == "Coma due to a structural brain disease",
     permdc_ae = drug_permdc & dose_permdc_reason == "Adverse event",
+    permdc_active_ae = drug_permdc_active & dose_permdc_reason == "Adverse event",
     permdc_refuseptfam = drug_permdc &
+      dose_permdc_reason == "Surrogate/patient refuse further study drug administration",
+    permdc_active_refuseptfam = drug_permdc_active &
       dose_permdc_reason == "Surrogate/patient refuse further study drug administration",
     permdc_refuseteam = drug_permdc &
       dose_permdc_reason == "Physician refused further study drug administration",
-    permdc_other = drug_permdc & dose_permdc_reason == "Other"
+    permdc_active_refuseteam = drug_permdc_active &
+      dose_permdc_reason == "Physician refused further study drug administration",
+    permdc_other = drug_permdc & dose_permdc_reason == "Other",
+    permdc_active_other = drug_permdc_active & dose_permdc_reason == "Other"
   ) %>%
   ## Merge on treatment group and calculate dose amount in mg
   left_join(rand_df %>% dplyr::select(id, trt), by = "id") %>%
@@ -249,7 +277,8 @@ doses_df <- drug_raw %>%
     drug_held, dose_held_reason, matches("^held\\_[a-z]+$"), held_other_exp,
     oversed_actual,
     ## Discontinuation info
-    drug_permdc, dose_permdc_reason, matches("^permdc\\_[a-z]+$"),
+    drug_permdc, drug_permdc_active, dose_permdc_reason,
+    matches("^permdc\\_[a-z]+$"), matches("^permdc\\_active\\_[a-z]+$"),
     permdc_other_exp
   )
 
@@ -323,14 +352,16 @@ ptdoses_df <- doses_df %>%
     times_held_other = sum_na(held_other),
     
     ## Indicator for whether drug ever permanently discontinued
-    ever_drug_permdc = sum_na(drug_permdc) > 0
+    ever_drug_permdc = sum_na(drug_permdc) > 0,
+    ever_drug_permdc_active = sum_na(drug_permdc_active) > 0
   ) %>%
   ## Create indicators for whether patient ever had drug held for each reason
   mutate_at(vars(matches("^times\\_held")), funs(ever = . > 0)) %>%
   rename_at(vars(matches("^times\\_held\\_.*\\_ever$")),
             funs(gsub("\\_ever$", "", gsub("times", "ever", .))))
 
-## Find reason for 1st discontinuation for each patient
+## Find each patient's reason for 1st discont. *ever*, whether or not
+##  discontinuation happened immediately after receiving a dose of study drug
 first_dc <- doses_df %>%
   filter(drug_permdc) %>%
   left_join(select(ih_events, unique_event_name, event_num),
@@ -339,7 +370,21 @@ first_dc <- doses_df %>%
   group_by(id) %>%
   slice(1) %>%
   ungroup %>%
-  select(id, dose_permdc_reason:permdc_other_exp)
+  select(id, dose_permdc_reason, matches("^permdc\\_[a-z]+$"))
+
+## Find each patient's reason for 1st discont. *while on active study drug*
+## "On active study drug" = received drug at dose immediately prior to
+##   discontinuation
+first_dc_active <- doses_df %>%
+  filter(drug_permdc_active) %>%
+  left_join(select(ih_events, unique_event_name, event_num),
+            by = c("redcap_event_name" = "unique_event_name")) %>%
+  arrange(id, event_num) %>%
+  group_by(id) %>%
+  slice(1) %>%
+  ungroup %>%
+  select(id, dose_permdc_reason, matches("^permdc\\_active\\_[a-z]+$")) %>%
+  rename(dose_permdc_active_reason = dose_permdc_reason)
 
 ## Find time of first dose actually received for each patient;
 ##  calculate time between randomization and first study drug
@@ -370,11 +415,12 @@ first_dose <- first_dose %>% dplyr::select(id, hrs_random_drug)
 
 ## Combine days, doses, and discontinuation information; one record per patient
 ptdrug_df <- reduce(
-  list(ptdays_df, ptdoses_df, first_dc, first_dose),
+  list(ptdays_df, ptdoses_df, first_dc, first_dc_active, first_dose),
   left_join, by = "id"
 ) %>%
   mutate_at(
-    vars(matches("^permdc\\_[a-z]+$")), funs(ifelse(is.na(.), FALSE, .))
+    vars(matches("^permdc\\_[a-z]+$"), matches("^permdc\\_active\\_[a-z]+$")),
+    funs(ifelse(is.na(.), FALSE, .))
   ) %>%
   select(id, ever_studydrug, num_drug_days, starts_with("mean_drug_daily"),
          num_drug_doses:times_drug_held, ever_held_qtc, times_held_qtc,
