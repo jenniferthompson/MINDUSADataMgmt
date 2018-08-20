@@ -265,11 +265,19 @@ doses_df <- drug_raw %>%
       !is.na(dose_ml) & trt == "Haloperidol" ~ dose_ml * 5,
       !is.na(dose_ml) & trt == "Ziprasidone" ~ dose_ml * 10,
       TRUE ~ as.numeric(NA)
+    ),
+    ## Variable for "drug status" (given, held, discontinued)
+    drug_status = case_when(
+      drug_given               ~ "Given",
+      drug_held                ~ "Held",
+      drug_permdc              ~ "Discontinued",
+      !is.na(dose_held_reason) ~ "Discharge/resolution",
+      TRUE                     ~ as.character(NA)
     )
   ) %>%
   ## Reorder columns
   select(
-    id, redcap_event_name, dose_num, drug_given,
+    id, redcap_event_name, dose_num, drug_status, drug_given,
     ## Dose, QTc/ECG info
     dose_dttm, dose_ml, dose_mg, dose_type, dose_type_other,
     pre_dose_qtc, ecg_ordered, ecg_result, post_dose_qtc,
@@ -281,6 +289,58 @@ doses_df <- drug_raw %>%
     matches("^permdc\\_[a-z]+$"), matches("^permdc\\_active\\_[a-z]+$"),
     permdc_other_exp
   )
+
+## -- Temporary holds: ---------------------------------------------------------
+## 1) Each time study drug was temporarily held, for how many doses was it held?
+## 2) How often was study drug restarted after a temporary hold?
+tempholds <- doses_df %>%
+  dplyr::select(id, redcap_event_name, dose_num, drug_status) %>%
+  ## Sort by event name
+  mutate(
+    sort_order = case_when(
+      str_detect(redcap_event_name, "^prerandom") ~ 1,
+      str_detect(redcap_event_name, "^enroll")    ~ 2,
+      TRUE                                        ~ 3
+    )
+  ) %>%
+  arrange(id, sort_order, redcap_event_name, dose_num) %>%
+  group_by(id) %>%
+  mutate(
+    ## Is this the patient's last dose?
+    total_doses = 1:n(),
+    last_dose = total_doses == n(),
+    ## Did the drug status change?
+    status_change = drug_status != lag(drug_status),
+    status_change = replace_na(status_change, FALSE),
+    status_number = cumsum(status_change)
+  ) %>%
+  group_by(id, status_number) %>%
+  mutate(
+    ## For how many doses was this status constant?
+    times_status = 1:n()
+  ) %>%
+  group_by(id) %>%
+  mutate(
+    ## Was drug *given* at the next status?
+    next_status = lead(drug_status)
+  ) %>%
+  ungroup() %>%
+  ## We really only care about temporary holds
+  filter(drug_status == "Held") %>%
+  group_by(id, status_number) %>%
+  slice(n()) %>%
+  ungroup() %>%
+  mutate(
+    drug_restarted = case_when(
+      next_status == "Given"                ~ "Restarted",
+      next_status == "Discontinued"         ~ "Permanently discontinued",
+      next_status == "Discharge/resolution" ~ "Dlr resolved/ICU discharge",
+      times_status == 1 & last_dose         ~ "[n/a; only last dose held]",
+      TRUE                                  ~ "Not restarted"
+    )
+  ) %>%
+  dplyr::select(id, redcap_event_name, dose_num, times_status, drug_restarted) %>%
+  rename(doses_held = times_status)
 
 ## -- Create one data set with one record per **patient**, summarizing ---------
 ## -- doses, holds, discontinuation --------------------------------------------
@@ -475,6 +535,9 @@ sink()
 ## -- Save both files to rds, csv ----------------------------------------------
 saveRDS(doses_df, file = "analysisdata/rds/doses.rds")
 write_csv(doses_df, path = "analysisdata/csv/doses.csv")
+
+saveRDS(tempholds, file = "analysisdata/rds/tempholds.rds")
+write_csv(tempholds, path = "analysisdata/csv/tempholds.csv")
 
 saveRDS(ptdrug_df, file = "analysisdata/rds/ptdrug.rds")
 write_csv(ptdrug_df, path = "analysisdata/csv/ptdrug.csv")

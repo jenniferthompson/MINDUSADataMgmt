@@ -16,6 +16,7 @@ admission_df     <- readRDS("analysisdata/rds/admission.rds")
 datestrack_df    <- readRDS("analysisdata/rds/datestrack.rds")
 ptdrug_df        <- readRDS("analysisdata/rds/ptdrug.rds")
 doses_df         <- readRDS("analysisdata/rds/doses.rds")
+tempholds_df     <- readRDS("analysisdata/rds/tempholds.rds")
 padasmts_df      <- readRDS("analysisdata/rds/padasmts.rds")
 paddaily_df      <- readRDS("analysisdata/rds/paddaily.rds")
 padsummary_df    <- readRDS("analysisdata/rds/padsummary.rds")
@@ -59,11 +60,18 @@ rand_pts <- rand_df %>% pull(id)
 ## -- All consented patients ---------------------------------------------------
 ## Want to describe demographics, ICU admission characteristics for all patients
 ## consented and not excluded
-ptsummary_all_df <- left_join(ptstatus_df, admission_df, by = "id") %>%
-  left_join(
+ptsummary_all_df <- reduce(
+  list(
+    ptstatus_df,
+    admission_df,
     dplyr::select(dailysummary_df, id, sofa_imp_consent, cv_sofa_consent),
-    by = "id"
-  ) %>%
+    dplyr::select(
+      datestrack_df, id, ends_with("_enroll")
+    )
+  ),
+  left_join,
+  by = "id"
+) %>%
   filter(consented & !excluded_ever) %>%
   dplyr::select(-(screened:exc_other))
 
@@ -84,7 +92,7 @@ daily_all_df <- reduce(
 ## One record per randomized patient with baseline, summary variables
 ptsummary_df <- reduce(
   list(
-    ptsummary_all_df %>% filter(randomized),
+    ptsummary_all_df %>% dplyr::select(-ends_with("_enroll")) %>% filter(randomized),
     datestrack_df,
     padsummary_df,
     dailysummary_df,
@@ -124,6 +132,6 @@ save(ptstatus_df, rand_df, rand_pts,
      ptsummary_all_df, daily_all_df,
      ptsummary_df, daily_int_df,
      padasmts_df, ## need these to describe missingness/imputation
-     doses_df, ptdrug_df,
+     doses_df, tempholds_df, ptdrug_df,
      torsades_df, noncompliance_df,
      file = "../MINDUSARCT/analysisdata/rct.Rdata")
